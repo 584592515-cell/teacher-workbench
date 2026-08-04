@@ -280,29 +280,69 @@ def run_server():
 
 
 if __name__ == '__main__':
-    # Start Flask server in a background thread
+    # ---- Start Node.js cloud server (port 5000) for data sync ----
+    cloud_port = 5000
+    cloud_server_process = None
+    cloud_server_dir = os.path.join(APP_DIR, 'cloud-server')
+    node_candidates = [
+        os.path.join(os.path.dirname(sys.executable), 'node.exe'),
+        os.path.join(os.path.expanduser('~'), '.workbuddy', 'binaries', 'node', 'versions', '22.22.2', 'node.exe'),
+        'node',
+    ]
+    
+    for node_path in node_candidates:
+        server_js = os.path.join(cloud_server_dir, 'server.js')
+        if os.path.exists(server_js):
+            try:
+                import subprocess as sp
+                cloud_server_process = sp.Popen(
+                    [node_path, server_js],
+                    cwd=cloud_server_dir,
+                    stdout=sp.DEVNULL, stderr=sp.DEVNULL,
+                    creationflags=sp.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                )
+                print(f"Cloud server starting on port {cloud_port} (node: {node_path})")
+                break
+            except Exception as e:
+                print(f"Failed to start cloud server with {node_path}: {e}")
+                cloud_server_process = None
+    
+    # ---- Start Flask server (port 5566) for webview ----
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
 
-    # Wait for server to be ready (poll health endpoint)
-    print("Waiting for server to start...")
+    # Wait for servers to be ready
+    print("Waiting for servers to start...")
     import urllib.request
     url = f'http://localhost:{PORT}'
+    cloud_url = f'http://localhost:{cloud_port}'
     max_retries = 30
     server_ready = False
+    cloud_ready = False
     for i in range(max_retries):
         try:
             time.sleep(0.5)
-            resp = urllib.request.urlopen(f'{url}/health', timeout=1)
-            if resp.getcode() == 200:
-                server_ready = True
+            if not server_ready:
+                resp = urllib.request.urlopen(f'{url}/health', timeout=1)
+                if resp.getcode() == 200:
+                    server_ready = True
+                    print(f"  Flask server ready: {url}")
+            if not cloud_ready and cloud_server_process:
+                resp = urllib.request.urlopen(f'{cloud_url}/api/health', timeout=1)
+                if resp.getcode() == 200:
+                    cloud_ready = True
+                    print(f"  Cloud server ready: {cloud_url}")
+            if server_ready and (cloud_ready or not cloud_server_process):
                 break
         except:
             pass
-        print(f"  Waiting... ({i+1}/{max_retries})")
+        if i % 5 == 4:
+            print(f"  Waiting... ({i+1}/{max_retries})")
 
     if not server_ready:
-        print("WARNING: Server did not start in time, attempting to open anyway...")
+        print("WARNING: Flask server did not start in time, attempting to open anyway...")
+    if cloud_server_process and not cloud_ready:
+        print("WARNING: Cloud server not available, data sync will use local Flask")
 
     local_ip = get_local_ip()
     print(f"Opening webview at {url}")
@@ -320,3 +360,15 @@ if __name__ == '__main__':
     )
 
     webview.start()
+    
+    # Cleanup: stop cloud server when app closes
+    if cloud_server_process:
+        try:
+            cloud_server_process.terminate()
+            cloud_server_process.wait(timeout=5)
+            print("Cloud server stopped")
+        except:
+            try:
+                cloud_server_process.kill()
+            except:
+                pass
