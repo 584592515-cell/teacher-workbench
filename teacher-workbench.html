@@ -1726,14 +1726,13 @@ function toast(msg, type='info') {
 }
 
 function today() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return formatDateISO(new Date());
 }
 
 function tomorrow() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return formatDateISO(d);
 }
 
 function getTomorrowWeekKey() {
@@ -1925,7 +1924,7 @@ function renderDashboard() {
   return `
     <div class="header">
       <h1>📊 工作台</h1>
-      <span class="date">${formatDate(new Date())} 星期${getWeekDay()}</span>
+      <span class="date">${formatDate(new Date())} 星期${getWeekDay()} · 今日: ${t}</span>
     </div>
     <div class="card">
       <div class="card-header"><h3><span class="card-icon">✅</span>今日考勤情况</h3></div>
@@ -1935,7 +1934,7 @@ function renderDashboard() {
       <div>
         <div class="card">
           <div class="card-header">
-            <h3><span class="card-icon">📋</span>今日工作计划</h3>
+            <h3><span class="card-icon">📋</span>今日工作计划 <span style="font-size:12px;color:var(--text-light);font-weight:400;">(${t})</span></h3>
             <span style="font-size:12px;color:var(--text-light);">来自周工作计划</span>
           </div>
           <div>${todayPlanHTML}</div>
@@ -1944,7 +1943,7 @@ function renderDashboard() {
       <div>
         <div class="card">
           <div class="card-header">
-            <h3><span class="card-icon">📝</span>明日工作计划</h3>
+            <h3><span class="card-icon">📝</span>明日工作计划 <span style="font-size:12px;color:var(--text-light);font-weight:400;">(${tm})</span></h3>
             <span style="font-size:12px;color:var(--text-light);">来自周工作计划</span>
           </div>
           <div>${tomorrowPlanHTML}</div>
