@@ -681,16 +681,28 @@ table input:focus, table select:focus {
 <script>
 // ============ API CONFIG ============
 // 云端同步服务器地址
-// 部署云服务器后在此填入地址，例如 'https://your-app.onrender.com'
-// 留空则使用当前页面的 origin（本地模式：电脑 EXE 正常，手机只能用离线模式）
+// 默认尝试本地云服务器 http://localhost:5000（可通过云同步设置修改）
 var CLOUD_SERVER_URL = '';
 var API_BASE = '';
-// 优先使用 IndexedDB 中保存的云端地址
+// 优先使用 IndexedDB 中保存的云端地址，否则尝试默认云服务器
 (async function() {
   try {
     var saved = await idbGet('settings', 'cloud_server_url');
     if (saved && saved.value) { CLOUD_SERVER_URL = saved.value; }
   } catch(e) {}
+  
+  // 如果没有保存的地址，且不是从云服务器加载的，尝试默认云服务器
+  if (!CLOUD_SERVER_URL && window.location.origin.indexOf('localhost:5000') === -1) {
+    try {
+      var testResp = await fetch('http://localhost:5000/api/health', { signal: AbortSignal.timeout(2000) });
+      if (testResp.ok) {
+        CLOUD_SERVER_URL = 'http://localhost:5000';
+        try { await idbPut('settings', { key: 'cloud_server_url', value: CLOUD_SERVER_URL }); } catch(e) {}
+        console.log('[CONFIG] 自动发现云服务器:', CLOUD_SERVER_URL);
+      }
+    } catch(e) { /* 云服务器不可用，使用本地模式 */ }
+  }
+  
   API_BASE = CLOUD_SERVER_URL || window.location.origin;
   console.log('[CONFIG] API_BASE =', API_BASE, '(cloud:', !!CLOUD_SERVER_URL, ')');
 })();
