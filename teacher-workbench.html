@@ -777,9 +777,9 @@ function connectSocket() {
     socket.on('full_sync', function(data) {
       console.log('[SOCKET] Received full sync from server');
       if (data && typeof data === 'object') {
-        // Server is authoritative - its data is the latest saved version
-        // Fill any missing keys from defaults, then replace local
-        appData = deepMerge(getDefaultData(), data);
+        // Merge server data into current local data (preserve local unsaved changes)
+        // Items with matching IDs get replaced by server version; unique local items survive
+        appData = deepMerge(appData, data);
         // Auto-repair any inflated schedule arrays
         trimSchedule(appData.classSchedule);
         trimSchedule(appData.personalSchedule);
@@ -793,7 +793,12 @@ function connectSocket() {
     socket.on('field_updated', function(data) {
       console.log('[SOCKET] Field updated by other client:', data.field);
       if (data.field && data.value !== undefined) {
-        appData[data.field] = data.value;
+        // Deep merge to preserve local items not in the server update
+        if (appData[data.field] && typeof appData[data.field] === 'object' && typeof data.value === 'object') {
+          appData[data.field] = deepMerge(appData[data.field], data.value);
+        } else {
+          appData[data.field] = data.value;
+        }
         // Auto-trim if a schedule field was updated
         if (data.field === 'classSchedule') trimSchedule(appData.classSchedule);
         if (data.field === 'personalSchedule') trimSchedule(appData.personalSchedule);
@@ -1442,8 +1447,8 @@ async function loadFromServer(forceReplace) {
       var data = await resp.json();
       if (data && typeof data === 'object') {
         if (forceReplace) {
-          // Server is authoritative: replace local, fill missing keys from defaults
-          appData = deepMerge(getDefaultData(), data);
+          // Merge server data into current local (ID-based: matching IDs replaced, unique kept)
+          appData = deepMerge(appData, data);
         } else {
           // Keep local changes that haven't been pushed, merge in server updates
           appData = deepMerge(appData, data);
@@ -1596,17 +1601,40 @@ function deepMerge(target, source) {
   for (const key of Object.keys(source)) {
     if (source[key] !== null && typeof source[key] === 'object' && !Array.isArray(source[key]) && target[key] !== null && typeof target[key] === 'object' && !Array.isArray(target[key])) {
       result[key] = deepMerge(target[key], source[key]);
-    } else if (Array.isArray(source[key]) && Array.isArray(target[key]) && source[key].length > 0 && target[key].length > 0 && typeof source[key][0] === 'object' && source[key][0] !== null && typeof source[key][0].id !== 'undefined') {
-      // ID-based merge: preserve target items not in source, update matching items
-      var merged = [...source[key]];
-      for (var ti = 0; ti < target[key].length; ti++) {
-        var tItem = target[key][ti];
-        if (tItem && typeof tItem === 'object' && typeof tItem.id !== 'undefined') {
-          var found = merged.find(function(m) { return m.id === tItem.id; });
-          if (!found) merged.push(tItem);
+    } else if (Array.isArray(source[key]) && Array.isArray(target[key])) {
+      // Check if items are id-bearing objects
+      var sLen = source[key].length;
+      var tLen = target[key].length;
+      var sourceHasItems = sLen > 0 && source[key][0] !== null && typeof source[key][0] === 'object';
+      var targetHasItems = tLen > 0 && target[key][0] !== null && typeof target[key][0] === 'object';
+      var sourceHasId = sourceHasItems && typeof source[key][0].id !== 'undefined';
+      var targetHasId = targetHasItems && typeof target[key][0].id !== 'undefined';
+      if (sourceHasId && targetHasId) {
+        // ID-based merge: preserve target items not in source, update matching items
+        var merged = [...source[key]];
+        for (var ti = 0; ti < target[key].length; ti++) {
+          var tItem = target[key][ti];
+          if (tItem && typeof tItem === 'object' && typeof tItem.id !== 'undefined') {
+            var found = merged.find(function(m) { return m.id === tItem.id; });
+            if (!found) merged.push(tItem);
+          }
         }
+        result[key] = merged;
+      } else if (sourceHasItems && targetHasItems && !sourceHasId && !targetHasId && typeof source[key][0].text !== 'undefined') {
+        // Text-based merge (workPlan items without explicit id migration)
+        var tm = [...source[key]];
+        for (var tj = 0; tj < target[key].length; tj++) {
+          var ttItem = target[key][tj];
+          if (ttItem && typeof ttItem === 'object' && ttItem.text) {
+            var tfound = tm.find(function(m) { return m.text === ttItem.text; });
+            if (!tfound) tm.push(ttItem);
+          }
+        }
+        result[key] = tm;
+      } else {
+        // Source is authoritative for simple arrays or incompatible types
+        result[key] = source[key];
       }
-      result[key] = merged;
     } else {
       result[key] = source[key];
     }
@@ -1885,12 +1913,17 @@ function renderDashboard() {
   `;
 }
 
+// Generate unique work plan item ID
+function genWPId() {
+  return 'wp_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
 function addWorkPlan(date) {
   const label = date === today() ? '今日' : (date === tomorrow() ? '明日' : date);
   const text = prompt(`请输入${label}工作计划内容：`);
   if (!text) return;
   if (!appData.workPlan[date]) appData.workPlan[date] = [];
-  appData.workPlan[date].push({ text, done: false });
+  appData.workPlan[date].push({ id: genWPId(), text, done: false });
   saveData();
   navigateTo('dashboard');
 }
@@ -3561,6 +3594,8 @@ async function loadLocalData() {
       // Auto-repair any inflated schedule arrays
       trimSchedule(appData.classSchedule);
       trimSchedule(appData.personalSchedule);
+      // Migrate: add IDs to old workPlan items
+      migrateWorkPlanIds();
       console.log('[DATA] Loaded from IndexedDB');
       return;
     }
@@ -3573,9 +3608,30 @@ async function loadLocalData() {
       appData = deepMerge(getDefaultData(), JSON.parse(saved));
       trimSchedule(appData.classSchedule);
       trimSchedule(appData.personalSchedule);
+      migrateWorkPlanIds();
       console.log('[DATA] Loaded from localStorage fallback');
     }
   } catch(e) {}
+}
+
+// Migration: add unique IDs to workPlan items that don't have them
+function migrateWorkPlanIds() {
+  if (!appData.workPlan) return;
+  var modified = false;
+  Object.keys(appData.workPlan).forEach(function(dateKey) {
+    var items = appData.workPlan[dateKey];
+    if (!Array.isArray(items)) return;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i] && typeof items[i] === 'object' && !items[i].id) {
+        items[i].id = genWPId();
+        modified = true;
+      }
+    }
+  });
+  if (modified) {
+    saveDataLocal(true);
+    console.log('[MIGRATE] Added IDs to workPlan items');
+  }
 }
 
 document.addEventListener('DOMContentLoaded', function() {
