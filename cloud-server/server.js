@@ -92,7 +92,7 @@ function getDefaultData() {
   };
 }
 
-// Deep merge (server-authoritative merge, like Python version)
+// Deep merge (server-authoritative merge)
 function deepMerge(target, source) {
   const result = {};
   // Copy target keys
@@ -107,19 +107,35 @@ function deepMerge(target, source) {
       if (Array.isArray(result[key]) && Array.isArray(source[key])) {
         const isDictArray = result[key].length > 0 && typeof result[key][0] === 'object' && !Array.isArray(result[key][0]);
         if (isDictArray) {
-          // Merge dict arrays by dedup
-          const merged = [...result[key]];
-          for (const item of source[key]) {
-            const exists = merged.some(m => JSON.stringify(m) === JSON.stringify(item));
-            if (!exists) merged.push(item);
+          // Smart merge: ID-based dedup for arrays with 'id' field, fallback to JSON dedup
+          const hasId = result[key][0] && typeof result[key][0].id !== 'undefined';
+          if (hasId) {
+            // ID-based merge: source items override target items with same ID
+            const merged = [...result[key]];
+            for (const item of source[key]) {
+              const idx = merged.findIndex(m => m.id === item.id);
+              if (idx >= 0) {
+                merged[idx] = deepMerge(merged[idx], item); // update existing
+              } else {
+                merged.push(item); // add new
+              }
+            }
+            result[key] = merged;
+          } else {
+            // JSON dedup for non-ID arrays
+            const merged = [...result[key]];
+            for (const item of source[key]) {
+              const exists = merged.some(m => JSON.stringify(m) === JSON.stringify(item));
+              if (!exists) merged.push(item);
+            }
+            result[key] = merged;
           }
-          result[key] = merged;
         } else {
-          // Simple arrays: replace with source
+          // Simple arrays: replace with source (schedules, periodTimes, etc.)
           result[key] = source[key];
         }
       } else {
-        // Recursive merge for objects
+        // Recursive merge for objects (schedules, seating, etc.)
         result[key] = deepMerge(result[key], source[key]);
       }
     } else {
@@ -184,6 +200,13 @@ io.on('connection', (socket) => {
   // Send current data on connect
   const data = loadData();
   socket.emit('full_sync', data);
+
+  // Handle explicit sync request from client (after push queue processed)
+  socket.on('request_sync', () => {
+    const latest = loadData();
+    socket.emit('full_sync', latest);
+    console.log('[SYNC] Sync requested by:', socket.id);
+  });
 
   // Handle field update (single field change from client)
   socket.on('field_updated', (change) => {
