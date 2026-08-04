@@ -1,0 +1,3507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>初中班主任工作台</title>
+<meta name="theme-color" content="#4A90D9">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="班主任工作台">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="manifest" href="/manifest.json">
+<script src="libs/echarts.min.js"></script>
+<script src="libs/xlsx.full.min.js"></script>
+<script src="libs/socket.io.min.js"></script>
+<style>
+:root {
+  --primary: #4A90D9;
+  --primary-light: #E8F0FE;
+  --primary-dark: #2C5F9E;
+  --bg: #F5F7FA;
+  --card-bg: #FFFFFF;
+  --text: #2C3E50;
+  --text-light: #7F8C8D;
+  --border: #E0E6ED;
+  --success: #27AE60;
+  --warning: #F39C12;
+  --danger: #E74C3C;
+  --sidebar-w: 240px;
+  --header-h: 56px;
+  --radius: 10px;
+  --shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  min-height: 100vh;
+}
+/* Sidebar */
+.sidebar {
+  width: var(--sidebar-w);
+  background: linear-gradient(180deg, #2C5F9E 0%, #4A90D9 100%);
+  color: #fff;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  overflow-y: auto;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+.sidebar-header {
+  padding: 20px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.15);
+  text-align: center;
+}
+.sidebar-header h2 { font-size: 18px; font-weight: 700; }
+.sidebar-header p { font-size: 12px; opacity: 0.8; margin-top: 4px; }
+.sidebar-nav { flex: 1; padding: 12px 0; }
+.nav-group { margin-bottom: 6px; }
+.nav-group-title {
+  padding: 8px 20px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  opacity: 0.6;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+.nav-item {
+  display: flex; align-items: center;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  color: rgba(255,255,255,0.85);
+  text-decoration: none;
+  border-left: 3px solid transparent;
+}
+.nav-item:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.nav-item.active { background: rgba(255,255,255,0.18); color: #fff; border-left-color: #fff; font-weight: 600; }
+.nav-item .icon { margin-right: 10px; font-size: 16px; width: 20px; text-align: center; }
+/* Main */
+.main {
+  flex: 1; margin-left: var(--sidebar-w);
+  padding: 20px 28px;
+  max-width: calc(100vw - var(--sidebar-w));
+}
+.page { display: none; }
+.page.active { display: block; }
+/* Header */
+.header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 24px;
+}
+.header h1 { font-size: 22px; font-weight: 700; }
+.header .date { color: var(--text-light); font-size: 14px; }
+/* Cards */
+.card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.card-header h3 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.card-header h3 .card-icon { color: var(--primary); font-size: 18px; }
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 16px; border: none; border-radius: 6px;
+  font-size: 13px; cursor: pointer; transition: all 0.2s;
+  font-weight: 500; text-decoration: none;
+}
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-success { background: var(--success); color: #fff; }
+.btn-success:hover { opacity: 0.9; }
+.btn-warning { background: var(--warning); color: #fff; }
+.btn-warning:hover { opacity: 0.9; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { opacity: 0.9; }
+.btn-outline { background: #fff; color: var(--primary); border: 1px solid var(--primary); }
+.btn-outline:hover { background: var(--primary-light); }
+.btn-ghost { background: transparent; color: var(--text-light); }
+.btn-ghost:hover { color: var(--text); background: var(--bg); }
+.btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Stats */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 14px; margin-bottom: 20px; }
+.stat-card {
+  background: var(--card-bg); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 16px 18px;
+  text-align: center;
+}
+.stat-card .num { font-size: 32px; font-weight: 700; color: var(--primary); }
+.stat-card .label { font-size: 13px; color: var(--text-light); margin-top: 4px; }
+.stat-card.accent .num { color: var(--success); }
+.stat-card.warn .num { color: var(--warning); }
+
+/* Tables */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+table th {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-weight: 600;
+  padding: 10px 10px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 2px solid var(--primary);
+}
+table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+table tr:hover { background: var(--bg); }
+table input, table select {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+  width: 100%;
+  min-width: 60px;
+  background: #fff;
+  transition: border 0.2s;
+}
+table input:focus, table select:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+/* Forms */
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: var(--text); }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 13px; transition: border 0.2s;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+.form-group textarea { resize: vertical; min-height: 80px; }
+.form-inline { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.form-inline .form-group { margin-bottom: 0; min-width: 120px; }
+/* Grids */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+@media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+/* Seating Chart */
+.seating-grid { display: inline-grid; gap: 4px; }
+.seat {
+  width: 90px; height: 52px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; cursor: pointer; transition: all 0.15s;
+  border: 1px dashed #ccc; background: #FAFBFC;
+  text-align: center; word-break: break-all; overflow: hidden;
+  position: relative;
+}
+.seat.occupied { background: var(--primary-light); border-color: var(--primary); color: var(--primary-dark); font-weight: 600; }
+.seat.empty { background: #fafafa; }
+.seat:hover { transform: scale(1.05); z-index: 2; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.seat .seat-num { position: absolute; top: 2px; right: 5px; font-size: 9px; color: #999; }
+.seat-chart-controls { margin-bottom: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* Schedule */
+.schedule-table th, .schedule-table td {
+  min-width: 100px; text-align: center;
+}
+.schedule-table td { padding: 6px; }
+.schedule-table td input { text-align: center; }
+
+/* Dashboard plan items */
+.plan-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.plan-item:last-child { border-bottom: none; }
+.plan-item .checkbox {
+  width: 18px; height: 18px; border: 2px solid #ccc;
+  border-radius: 4px; cursor: pointer; flex-shrink: 0; margin-top: 1px;
+  transition: all 0.2s;
+}
+.plan-item .checkbox.done { background: var(--success); border-color: var(--success); }
+.plan-item .checkbox.done::after { content: '✓'; color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; height: 100%; }
+.plan-item .plan-text { flex:1; font-size:14px; }
+.plan-item .plan-text.done-text { text-decoration: line-through; color: var(--text-light); }
+/* Tags */
+.tag {
+  display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 600;
+}
+.tag-green { background: #E8F8F5; color: #27AE60; }
+.tag-red { background: #FDEDEC; color: #E74C3C; }
+.tag-orange { background: #FEF5E7; color: #F39C12; }
+.tag-blue { background: var(--primary-light); color: var(--primary); }
+/* Modal */
+.modal-overlay {
+  position: fixed; top:0;left:0;right:0;bottom:0;
+  background: rgba(0,0,0,0.45); z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal {
+  background: #fff; border-radius: 12px;
+  padding: 24px; max-width: 700px; width: 90%;
+  max-height: 80vh; overflow-y: auto;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+}
+.modal h3 { margin-bottom: 16px; font-size: 18px; }
+/* Toast */
+.toast {
+  position: fixed; top: 20px; right: 20px; z-index: 9999;
+  padding: 12px 20px; border-radius: 8px;
+  color: #fff; font-size: 14px; font-weight: 500;
+  animation: slideIn 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.toast.success { background: var(--success); }
+.toast.error { background: var(--danger); }
+.toast.info { background: var(--primary); }
+@keyframes slideIn { from { transform: translateX(100%); opacity:0; } to { transform: translateX(0); opacity:1; } }
+/* Tabs */
+.tabs { display: flex; gap: 2px; margin-bottom: 16px; border-bottom: 2px solid var(--border); }
+.tab {
+  padding: 8px 16px; cursor: pointer;
+  border: none; background: none;
+  font-size: 13px; color: var(--text-light);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px; font-weight: 500;
+  transition: all 0.2s;
+}
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.tab:hover { color: var(--primary); }
+/* Chart */
+.chart-container { width: 100%; height: 380px; }
+/* Progress */
+.progress-bar {
+  height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 4px;
+}
+.progress-fill { height: 100%; background: var(--primary); border-radius: 4px; transition: width 0.3s; }
+/* Image preview */
+.img-preview { max-width: 200px; max-height: 150px; border-radius: 6px; margin: 5px; border: 1px solid var(--border); }
+/* Empty state */
+.empty-state { text-align: center; padding: 40px; color: var(--text-light); }
+.empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
+/* Attendance summary */
+.att-summary-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color); font-size: 14px;
+}
+.att-summary-row:last-child { border-bottom: none; }
+.att-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 12px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.att-badge.leave { background: #fff3cd; color: #856404; }
+.att-badge.late { background: #fce4ec; color: #c62828; }
+.att-badge.absent { background: #e8eaf6; color: #283593; }
+/* Meeting images */
+.meeting-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.meeting-image-wrap { position: relative; display: inline-block; }
+.meeting-image-wrap img { max-width: 180px; max-height: 120px; border-radius: 6px; border: 1px solid var(--border); }
+.meeting-image-wrap .del-img {
+  position: absolute; top: -6px; right: -6px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--danger); color: #fff;
+  border: none; cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+/* Fee balance */
+.fee-balance { font-size: 28px; font-weight: 700; }
+.fee-balance.positive { color: var(--success); }
+.fee-balance.negative { color: var(--danger); }
+/* Login page */
+.login-wrapper {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 100vh; background: linear-gradient(135deg, #E8F0FE 0%, #4A90D9 100%);
+}
+.login-card {
+  background: #fff; border-radius: 16px; box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+  padding: 48px 40px; width: 400px; text-align: center;
+}
+.login-card h1 { font-size: 26px; color: var(--primary-dark); margin-bottom: 4px; }
+.login-card .subtitle { font-size: 14px; color: var(--text-light); margin-bottom: 32px; }
+.login-card .form-group { text-align: left; margin-bottom: 20px; }
+.login-card .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+.login-card .form-group input {
+  width: 100%; padding: 10px 14px; border: 2px solid var(--border); border-radius: 8px;
+  font-size: 14px; transition: border-color 0.2s; outline: none;
+}
+.login-card .form-group input:focus { border-color: var(--primary); }
+.login-card .login-error { color: var(--danger); font-size: 13px; min-height: 20px; margin-bottom: 8px; }
+.login-card .btn-login {
+  width: 100%; padding: 12px; background: var(--primary); color: #fff;
+  border: none; border-radius: 8px; font-size: 16px; font-weight: 600;
+  cursor: pointer; transition: background 0.2s;
+}
+.login-card .btn-login:hover { background: var(--primary-dark); }
+/* Account settings modal */
+.acct-modal {
+  max-width: 420px;
+}
+.acct-modal .form-group { margin-bottom: 16px; }
+.acct-modal .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+.acct-modal .form-group input {
+  width: 100%; padding: 9px 12px; border: 2px solid var(--border); border-radius: 6px;
+  font-size: 14px; outline: none;
+}
+.acct-modal .form-group input:focus { border-color: var(--primary); }
+/* Generic modal overlay */
+.modal-overlay {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal-dialog {
+  background: #fff; border-radius: 12px; padding: 24px; max-width: 460px; width: 90%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.modal-dialog h3 { margin-top: 0; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.sidebar-footer { padding: 12px 18px; border-top: 1px solid rgba(255,255,255,0.15); }
+.sidebar-footer .nav-item { padding: 8px 4px; font-size: 13px; cursor: pointer; }
+/* Sync status bar */
+.sync-bar {
+  position: fixed; top: 0; left: 0; right: 0; height: 24px;
+  background: #f0f0f0; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; z-index: 200; gap: 6px;
+}
+.sync-bar.online { background: #E8F5E9; color: #27AE60; }
+.sync-bar.offline { background: #FFF3E0; color: #F39C12; }
+.sync-bar.disconnected { background: #FFEBEE; color: #E74C3C; }
+/* Refresh button in sync bar */
+.sync-refresh-btn {
+  background: rgba(255,255,255,0.7); border: 1px solid currentColor;
+  color: inherit; padding: 1px 10px; border-radius: 10px;
+  cursor: pointer; font-size: 10px; font-weight: 600;
+  transition: all 0.2s; margin-left: 4px;
+}
+.sync-refresh-btn:hover { background: rgba(255,255,255,0.95); transform: scale(1.05); }
+.sync-refresh-btn.refreshing { animation: spin 0.8s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+/* Save button in sync bar */
+.sync-save-btn {
+  background: #27AE60; border: none; color: #fff; padding: 2px 10px;
+  border-radius: 10px; cursor: pointer; font-size: 10px; font-weight: 700;
+  transition: all 0.2s; margin-left: 2px;
+}
+.sync-save-btn:hover { background: #219A52; transform: scale(1.05); }
+.sync-save-btn.saving { opacity: 0.7; pointer-events: none; }
+.sync-save-btn.has-unsaved { background: #F39C12; animation: pulse-save 1.5s infinite; }
+@keyframes pulse-save {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(243, 156, 18, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(243, 156, 18, 0); }
+}
+.sync-last-time { font-size: 10px; opacity: 0.8; }
+
+/* Mobile floating save button (FAB) */
+.mobile-save-fab {
+  display: none;
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  z-index: 500; background: #27AE60; color: #fff; border: none;
+  padding: 10px 28px; border-radius: 28px;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(39,174,96,0.4);
+  transition: all 0.2s; letter-spacing: 1px;
+  white-space: nowrap;
+}
+.mobile-save-fab:active { transform: translateX(-50%) scale(0.95); }
+.mobile-save-fab.saving { opacity: 0.7; pointer-events: none; }
+.mobile-save-fab.has-unsaved {
+  background: #F39C12; animation: pulse-save 1.5s infinite;
+  box-shadow: 0 4px 16px rgba(243,156,18,0.4);
+}
+.sync-last-time { font-size: 10px; opacity: 0.8; margin-left: 6px; }
+/* PWA install banner */
+.pwa-install-banner {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 300;
+  background: #fff; padding: 12px 16px; box-shadow: 0 -2px 12px rgba(0,0,0,0.15);
+  display: flex; justify-content: center;
+}
+.pwa-install-content {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  justify-content: center; max-width: 600px;
+}
+.pwa-install-content span { font-size: 14px; color: var(--text); }
+.pwa-install-btns { display: flex; gap: 8px; align-items: center; }
+/* Offline indicator */
+.offline-indicator {
+  display: none; position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
+  z-index: 400; background: #F39C12; color: #fff; padding: 6px 16px;
+  border-radius: 20px; font-size: 13px; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2); animation: fadeIn 0.3s;
+}
+.offline-indicator.show { display: block; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* PWA Install Card */
+.install-card {
+  background: #fff; border-radius: 12px; padding: 16px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08); margin-top: 16px;
+  text-align: left; border: 1px solid var(--border);
+}
+.install-card h4 { font-size: 15px; margin-bottom: 8px; color: var(--primary-dark); }
+.install-card ol { font-size: 13px; color: var(--text); line-height: 1.8; padding-left: 18px; }
+.install-card ol li { margin-bottom: 4px; }
+.install-card .platform-badge {
+  display: inline-block; background: var(--primary-light); color: var(--primary-dark);
+  padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-bottom: 8px;
+}
+.install-btn-floating {
+  position: fixed; bottom: 20px; right: 20px; z-index: 300;
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--primary); color: #fff; border: none;
+  font-size: 22px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.2s;
+}
+.install-btn-floating:hover { transform: scale(1.1); }
+.pwa-guide-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.pwa-guide-modal {
+  background: #fff; border-radius: 16px; padding: 24px;
+  max-width: 420px; width: 100%; max-height: 85vh; overflow-y: auto;
+}
+.pwa-guide-modal h3 { margin-bottom: 12px; font-size: 18px; }
+.pwa-guide-modal .step { display: flex; gap: 10px; margin-bottom: 12px; align-items: flex-start; }
+.pwa-guide-modal .step-num {
+  width: 24px; height: 24px; border-radius: 50%; background: var(--primary);
+  color: #fff; font-size: 12px; font-weight: 700; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.pwa-guide-modal .step-text { font-size: 14px; line-height: 1.6; }
+.pwa-guide-modal .note {
+  background: #FFF8E1; border-left: 3px solid #F39C12; padding: 10px 12px;
+  border-radius: 4px; font-size: 13px; color: #666; margin-top: 8px;
+}
+/* Mobile nav toggle */
+.mobile-nav-toggle {
+  display: none; position: fixed; top: 10px; left: 10px; z-index: 250;
+  width: 36px; height: 36px; border-radius: 8px; background: var(--primary);
+  color: #fff; border: none; font-size: 18px; cursor: pointer; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+/* Sidebar overlay for mobile */
+.sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 90; }
+.sidebar-overlay.show { display: block; }
+/* Responsive */
+@media (max-width: 768px) {
+  :root { --sidebar-w: 240px; }
+  body { flex-direction: column; }
+  .sidebar {
+    transform: translateX(-100%); transition: transform 0.3s;
+    width: var(--sidebar-w); z-index: 150;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .mobile-nav-toggle { display: flex; }
+  .main { margin-left: 0 !important; max-width: 100vw !important; padding: 12px 12px !important; }
+  .main.padded-top { padding-top: 40px !important; }
+  .header { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .header h1 { font-size: 18px; }
+  .stats-grid { grid-template-columns: repeat(2,1fr); gap: 8px; }
+  .stat-card { padding: 12px; }
+  .stat-card .num { font-size: 24px; }
+  .grid-2, .grid-3 { grid-template-columns: 1fr; gap: 12px; }
+  .card { padding: 14px; margin-bottom: 12px; }
+  table { font-size: 11px; }
+  table th, table td { padding: 6px 6px; }
+  .login-card { width: 90%; padding: 32px 24px; }
+  .login-card h1 { font-size: 20px; }
+  .btn { padding: 6px 12px; font-size: 12px; }
+  .seating-grid { gap: 2px; }
+  .seat { width: 52px; height: 36px; font-size: 9px; border-radius: 4px; }
+  .nav-item { padding: 8px 16px; font-size: 13px; }
+  .sync-bar { font-size: 10px; height: 22px; flex-wrap: wrap; padding: 2px 8px; }
+  .sync-bar .sync-refresh-btn { font-size: 9px; padding: 0 8px; }
+  .sync-bar .sync-save-btn { font-size: 9px; padding: 0 8px; }
+  .sync-bar .sync-last-time { font-size: 8px; }
+  .mobile-save-fab { display: block; }
+  table input, table select { font-size: 10px; padding: 3px 4px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Login Page -->
+<div id="loginWrapper" class="login-wrapper">
+  <div class="login-card">
+    <h1>📋 班主任工作台</h1>
+    <p class="subtitle">初中班主任专用 · 请登录</p>
+    <div class="form-group">
+      <label>用户名</label>
+      <input type="text" id="loginUser" placeholder="请输入用户名" autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label>密码</label>
+      <input type="password" id="loginPass" placeholder="请输入密码" autocomplete="current-password">
+    </div>
+    <div class="form-group" style="margin-bottom:8px;text-align:left;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;cursor:pointer;">
+        <input type="checkbox" id="rememberUser" style="width:auto;margin:0;cursor:pointer;"> 记住用户名
+      </label>
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <button class="btn-login" id="loginBtn" onclick="doLogin(); return false;">🔐 登 录</button>
+
+    <!-- PWA Install Help (mobile) -->
+    <div id="loginInstallHelp" style="display:none;">
+      <div class="install-card">
+        <span class="platform-badge" id="installPlatformBadge">手机</span>
+        <h4>📲 安装到桌面，离线也能用</h4>
+        <ol id="installSteps">
+          <li>点击浏览器菜单（⋮）</li>
+          <li>选择「添加到主屏幕」或「安装应用」</li>
+          <li>桌面即可生成图标，像APP一样使用</li>
+        </ol>
+        <button class="btn btn-sm btn-primary" onclick="showPWAGuide()" style="margin-top:8px;width:100%;">查看详细安装步骤</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PWA Install Banner -->
+<div id="pwaInstallBanner" class="pwa-install-banner" style="display:none;">
+  <div class="pwa-install-content">
+    <span>📱 将此应用安装到手机桌面，离线也能使用</span>
+    <div class="pwa-install-btns">
+      <button class="btn btn-primary btn-sm" onclick="installPWA()">📥 安装</button>
+      <button class="btn btn-ghost btn-sm" onclick="dismissPWAInstall()">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- App Container (hidden until login) -->
+<div id="appContainer" style="display:none;">
+
+<!-- Sync Status Bar -->
+<div id="syncBar" class="sync-bar disconnected"><span id="syncText">🔄 正在连接服务器...</span> <button id="syncSaveBtn" class="sync-save-btn" onclick="doManualSave()">💾 保存</button> <button id="syncRefreshBtn" class="sync-refresh-btn" onclick="manualRefresh()" title="从服务器刷新最新数据">⟳ 刷新</button> <span class="sync-last-time" id="syncLastTime"></span></div>
+
+<!-- Mobile floating save button -->
+<button id="mobileSaveFab" class="mobile-save-fab" onclick="doManualSave()">💾 保存到服务器</button>
+
+<!-- Mobile Nav Toggle -->
+<button class="mobile-nav-toggle" id="mobileNavToggle" onclick="toggleMobileNav()">☰</button>
+
+<!-- Sidebar Overlay -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeMobileNav()"></div>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>📋 班主任工作台</h2>
+    <p>初中班主任专用</p>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-group">
+      <div class="nav-group-title">总览</div>
+      <div class="nav-item active" data-page="dashboard">
+        <span class="icon">📊</span> 工作台仪表盘
+      </div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">班级管理</div>
+      <div class="nav-item" data-page="class-info"><span class="icon">🏫</span> 班级总体信息</div>
+      <div class="nav-item" data-page="class-schedule"><span class="icon">📅</span> 班级课程表</div>
+      <div class="nav-item" data-page="students"><span class="icon">👥</span> 班级成员信息</div>
+      <div class="nav-item" data-page="seating"><span class="icon">🪑</span> 班级座位表</div>
+      <div class="nav-item" data-page="attendance"><span class="icon">✅</span> 考勤记录</div>
+      <div class="nav-item" data-page="grades"><span class="icon">📈</span> 成绩管理</div>
+      <div class="nav-item" data-page="meetings"><span class="icon">📝</span> 班会记录</div>
+      <div class="nav-item" data-page="parent-comm"><span class="icon">📞</span> 家长沟通记录</div>
+      <div class="nav-item" data-page="behavior"><span class="icon">⭐</span> 学生行为记录</div>
+      <div class="nav-item" data-page="fees"><span class="icon">💰</span> 班费管理</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">教学管理</div>
+      <div class="nav-item" data-page="my-schedule"><span class="icon">🗓️</span> 个人教学课表</div>
+      <div class="nav-item" data-page="teaching-classes"><span class="icon">📚</span> 教学班级管理</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">其他</div>
+      <div class="nav-item" data-page="notifications"><span class="icon">🔔</span> 通知公告栏</div>
+      <div class="nav-item" data-page="account"><span class="icon">👤</span> 账号设置</div>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="nav-item" onclick="showCloudSettings()">☁️ 云同步设置</div>
+    <div class="nav-item" onclick="doLogout()">🚪 退出登录</div>
+  </div>
+</aside>
+
+<!-- Cloud Settings Modal -->
+<div id="cloudSettingsOverlay" class="modal-overlay">
+  <div class="modal-dialog">
+    <h3>☁️ 云同步服务器设置</h3>
+    <p style="color:var(--text-light);font-size:13px;margin-bottom:12px;">
+      部署云端服务器后可填入地址，实现多设备实时同步。
+      留空则使用本地模式（电脑 EXE 正常，手机仅离线存储）。
+    </p>
+    <label style="display:block;font-size:13px;font-weight:600;margin-bottom:5px;">服务器地址</label>
+    <input id="cloudUrlInput" type="text" placeholder="例如 https://your-app.onrender.com" style="width:100%;padding:9px 12px;border:2px solid var(--border);border-radius:6px;font-size:14px;outline:none;box-sizing:border-box;">
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveCloudSettings()">💾 保存</button>
+      <button class="btn btn-outline" onclick="closeCloudSettings()">取消</button>
+    </div>
+    <div style="margin-top:12px;padding:10px;background:var(--bg);border-radius:6px;font-size:12px;color:var(--text-light);">
+      💡 <strong>如何部署云服务器？</strong><br>
+      1. 将项目中的 <code>cloud-server</code> 文件夹上传到 Render.com（免费）<br>
+      2. 部署后将获得的网址填入上方输入框<br>
+      3. 电脑和手机即可通过云端实时同步
+    </div>
+  </div>
+</div>
+
+<!-- Main Content -->
+<main class="main" id="mainContent"></main>
+
+<!-- Floating Install Button (mobile, not standalone) -->
+<button id="installFab" class="install-btn-floating" style="display:none;" onclick="showPWAGuide()" title="安装到桌面">📲</button>
+
+</div><!-- /#appContainer -->
+
+<!-- Toast container -->
+<div id="toastContainer"></div>
+
+<!-- Offline indicator -->
+<div id="offlineIndicator" class="offline-indicator">⚡ 离线模式 · 数据将自动同步</div>
+
+<script>
+// ============ API CONFIG ============
+// 云端同步服务器地址
+// 部署云服务器后在此填入地址，例如 'https://your-app.onrender.com'
+// 留空则使用当前页面的 origin（本地模式：电脑 EXE 正常，手机只能用离线模式）
+var CLOUD_SERVER_URL = '';
+var API_BASE = '';
+// 优先使用 IndexedDB 中保存的云端地址
+(async function() {
+  try {
+    var saved = await idbGet('settings', 'cloud_server_url');
+    if (saved && saved.value) { CLOUD_SERVER_URL = saved.value; }
+  } catch(e) {}
+  API_BASE = CLOUD_SERVER_URL || window.location.origin;
+  console.log('[CONFIG] API_BASE =', API_BASE, '(cloud:', !!CLOUD_SERVER_URL, ')');
+})();
+const STORAGE_KEY = 'teacher_workbench_data';
+const AUTH_KEY = 'teacher_workbench_auth';
+const DEFAULT_USER = 'chenqi';
+const DEFAULT_PASS = '638893';
+let socket = null;
+let socketConnected = false;
+let useApi = true; // Will be set false if server unavailable
+let _lastSyncTime = null;
+let _hasUnsavedChanges = false;
+let _usingCloud = false; // true when connected to cloud server
+
+// ============ SOCKET.IO ============
+function connectSocket() {
+  try {
+    if (typeof io === 'undefined') {
+      console.warn('Socket.IO library not loaded, running in offline mode');
+      useApi = false;
+      updateSyncStatus('local');
+      return;
+    }
+    socket = io(API_BASE, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 2000 });
+    socket.on('connect', function() {
+      socketConnected = true;
+      updateSyncStatus('online');
+      console.log('Socket.IO connected');
+      // Push any offline changes to server FIRST, then sync down
+      processSyncQueue().then(function() {
+        socket.emit('request_sync');
+      });
+    });
+    socket.on('disconnect', function() {
+      socketConnected = false;
+      updateSyncStatus('offline');
+      console.log('Socket.IO disconnected');
+    });
+    socket.on('connect_error', function() {
+      socketConnected = false;
+      updateSyncStatus('disconnected');
+    });
+    socket.on('full_sync', function(data) {
+      console.log('Received full sync from server');
+      if (data && typeof data === 'object') {
+        // Server is authoritative - its data is the latest saved version
+        // Fill any missing keys from defaults, then replace local
+        appData = deepMerge(getDefaultData(), data);
+        // Auto-repair any inflated schedule arrays
+        trimSchedule(appData.classSchedule);
+        trimSchedule(appData.personalSchedule);
+        _lastSyncTime = new Date();
+        _hasUnsavedChanges = false;
+        saveDataLocal(true).then(function() { updateSaveButton(); });
+        refreshCurrentPage();
+      }
+    });
+    socket.on('field_updated', function(data) {
+      console.log('Field updated by other client:', data.field);
+      if (data.field && data.value !== undefined) {
+        appData[data.field] = data.value;
+        // Auto-trim if a schedule field was updated
+        if (data.field === 'classSchedule') trimSchedule(appData.classSchedule);
+        if (data.field === 'personalSchedule') trimSchedule(appData.personalSchedule);
+        _hasUnsavedChanges = false;
+        saveDataLocal(true).then(function() { updateSaveButton(); });
+        refreshCurrentPage();
+      }
+    });
+    socket.on('data_changed', function(data) {
+      console.log('Data changed by other client, reloading:', data.field);
+      // Server is authoritative — replace local with latest server data
+      loadFromServer(true);
+    });
+  } catch(e) {
+    console.warn('Socket.IO init failed, using offline mode:', e);
+    useApi = false;
+  }
+}
+
+function updateSyncStatus(status) {
+  var bar = document.getElementById('syncBar');
+  var text = document.getElementById('syncText');
+  if (!bar) return;
+  bar.className = 'sync-bar ' + status;
+  var msg = '';
+  if (status === 'online') {
+    msg = '🟢 已连接服务器';
+  } else if (status === 'offline') {
+    msg = '🟡 服务器连接中断 · 数据暂存本地';
+  } else {
+    msg = '🔴 未连接服务器 · 离线模式';
+  }
+  if (text) { text.textContent = msg; }
+  updateSyncTime();
+  updateSaveButton();
+}
+
+function updateSyncTime() {
+  var el = document.getElementById('syncLastTime');
+  if (!el) return;
+  if (_lastSyncTime) {
+    el.textContent = '上次同步: ' + formatTime(_lastSyncTime);
+  } else {
+    el.textContent = '';
+  }
+}
+
+function formatTime(d) {
+  var h = d.getHours().toString().padStart(2, '0');
+  var m = d.getMinutes().toString().padStart(2, '0');
+  var s = d.getSeconds().toString().padStart(2, '0');
+  return h + ':' + m + ':' + s;
+}
+
+// ============ AUTH ============
+function getAuth() {
+  try {
+    var saved = localStorage.getItem(AUTH_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return { username: DEFAULT_USER, password: DEFAULT_PASS };
+}
+
+function saveAuth(auth) {
+  try { localStorage.setItem(AUTH_KEY, JSON.stringify(auth)); } catch(e) {}
+}
+
+async function fillRememberedUser() {
+  var username = null;
+  // Try IndexedDB first (more reliable)
+  try {
+    var entry = await idbGet('settings', 'remembered_user');
+    if (entry && entry.value) username = entry.value;
+  } catch(e) {}
+  // Fallback to localStorage
+  if (!username) {
+    try { username = localStorage.getItem('teacher_workbench_remembered_user'); } catch(e) {}
+  }
+  if (username) {
+    document.getElementById('loginUser').value = username;
+    document.getElementById('rememberUser').checked = true;
+  }
+}
+
+function doLogin() {
+  // Prevent double-execution
+  if (window._loginInProgress) return;
+  window._loginInProgress = true;
+
+  var userEl = document.getElementById('loginUser');
+  var passEl = document.getElementById('loginPass');
+  var errEl = document.getElementById('loginError');
+  var btn = document.getElementById('loginBtn');
+
+  var user = userEl ? userEl.value.trim() : '';
+  var pass = passEl ? passEl.value : '';
+
+  if (!user || !pass) {
+    errEl.textContent = '⚠️ 请输入用户名和密码';
+    window._loginInProgress = false;
+    return;
+  }
+
+  // Immediate visual feedback (synchronous, no await needed to see this)
+  errEl.textContent = '';
+  if (btn) {
+    btn.textContent = '⏳ 验证中...';
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.pointerEvents = 'none';
+    btn.setAttribute('disabled', 'disabled');
+  }
+
+  // Wrap everything in a try to ensure button is restored on any error
+  (async function() {
+    try {
+      var authed = false;
+
+      // Try server auth first (with 3s timeout — quicker fallback)
+      if (useApi) {
+        try {
+          var controller = new AbortController();
+          var timeoutId = setTimeout(function() { controller.abort(); }, 3000);
+          var resp = await fetch(API_BASE + '/api/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: user, password: pass }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (resp.ok) {
+            var result = await resp.json();
+            authed = result.success === true;
+          }
+        } catch(e) {
+          console.warn('[LOGIN] Server auth failed, using local:', e.message);
+        }
+      }
+
+      // Fallback to local auth
+      if (!authed) {
+        var auth = getAuth();
+        authed = (user === auth.username && pass === auth.password);
+        console.log('[LOGIN] Local auth result:', authed, 'user:', user);
+      }
+
+      if (authed) {
+        // Remember username
+        var remember = document.getElementById('rememberUser');
+        if (remember && remember.checked) {
+          try { localStorage.setItem('teacher_workbench_remembered_user', user); } catch(e) {}
+          try { await idbPut('settings', { key: 'remembered_user', value: user }); } catch(e) {}
+        } else {
+          try { localStorage.removeItem('teacher_workbench_remembered_user'); } catch(e) {}
+          try { await idbDelete('settings', 'remembered_user'); } catch(e) {}
+        }
+        try { localStorage.setItem('teacher_workbench_loggedin', '1'); } catch(e) {}
+        window._teacher_loggedin = true;
+        window._loginInProgress = false;
+
+        document.getElementById('loginWrapper').style.display = 'none';
+        document.getElementById('appContainer').style.display = '';
+        document.body.style.display = 'flex';
+        await init();
+        updateInstallUI();
+      } else {
+        errEl.textContent = '❌ 用户名或密码错误，请重试';
+        restoreLoginButton(btn);
+        window._loginInProgress = false;
+      }
+    } catch(e) {
+      console.error('[LOGIN] Unexpected error:', e);
+      if (errEl) errEl.textContent = '⚠️ 登录出错: ' + (e.message || '未知错误');
+      restoreLoginButton(btn);
+      window._loginInProgress = false;
+    }
+  })();
+}
+
+function restoreLoginButton(btn) {
+  if (btn) {
+    btn.textContent = '🔐 登 录';
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.pointerEvents = '';
+    btn.removeAttribute('disabled');
+  }
+}
+
+// ============ CLOUD SYNC SETTINGS ============
+function showCloudSettings() {
+  var overlay = document.getElementById('cloudSettingsOverlay');
+  var input = document.getElementById('cloudUrlInput');
+  if (input) input.value = CLOUD_SERVER_URL || '';
+  if (overlay) overlay.classList.add('show');
+}
+function closeCloudSettings() {
+  var overlay = document.getElementById('cloudSettingsOverlay');
+  if (overlay) overlay.classList.remove('show');
+}
+function saveCloudSettings() {
+  var input = document.getElementById('cloudUrlInput');
+  var url = (input ? input.value.trim() : '').replace(/\/+$/, ''); // strip trailing slash
+  CLOUD_SERVER_URL = url;
+  API_BASE = url || window.location.origin;
+  try { idbPut('settings', { key: 'cloud_server_url', value: url }); } catch(e) {}
+  console.log('[CLOUD] Server URL set to:', API_BASE);
+  // Reconnect socket with new URL
+  if (socket) { socket.disconnect(); socket = null; }
+  socketConnected = false;
+  if (url) {
+    connectSocket();
+    toast('☁️ 已切换到云端服务器: ' + url, 'success');
+  } else {
+    toast('📋 已切换到本地模式', 'info');
+  }
+  closeCloudSettings();
+}
+
+function doLogout() {
+  if (!confirm('确定要退出登录吗？')) return;
+  try { localStorage.removeItem('teacher_workbench_loggedin'); } catch(e) {}
+  window._teacher_loggedin = false;
+  window._loginInProgress = false;
+  _initCalled = false;
+  if (socket) { socket.disconnect(); socket = null; }
+  socketConnected = false;
+  document.getElementById('appContainer').style.display = 'none';
+  document.getElementById('loginWrapper').style.display = '';
+  document.body.style.display = '';
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginError').textContent = '';
+  // Re-fill remembered username
+  fillRememberedUser();
+}
+
+function renderAccount() {
+  var auth = getAuth();
+  var html = '<div class="header"><h1>👤 账号设置</h1></div>' +
+    '<div class="card"><div class="card-header"><h3>修改登录信息</h3></div>' +
+    '<div class="acct-modal">' +
+    '<div class="form-group"><label>当前用户名</label><input id="acct-cur-user" value="' + escapeHtml(auth.username) + '" readonly style="background:#f5f5f5;"></div>' +
+    '<div class="form-group"><label>新用户名</label><input id="acct-new-user" placeholder="留空则不修改用户名"></div>' +
+    '<div class="form-group"><label>当前密码</label><input type="password" id="acct-cur-pass" placeholder="请输入当前密码"></div>' +
+    '<div class="form-group"><label>新密码</label><input type="password" id="acct-new-pass" placeholder="留空则不修改密码"></div>' +
+    '<div class="form-group"><label>确认新密码</label><input type="password" id="acct-new-pass2" placeholder="再次输入新密码"></div>' +
+    '<div class="btn-group"><button class="btn btn-primary" onclick="saveAccount()">💾 保存修改</button>' +
+    '<button class="btn btn-warning" onclick="resetCredentials()">🔄 恢复默认</button></div></div></div>';
+  return html;
+}
+
+async function saveAccount() {
+  var auth = getAuth();
+  var curPass = document.getElementById('acct-cur-pass').value;
+  if (curPass !== auth.password) { toast('当前密码错误', 'error'); return; }
+  var newUser = document.getElementById('acct-new-user').value.trim();
+  var newPass = document.getElementById('acct-new-pass').value;
+  var newPass2 = document.getElementById('acct-new-pass2').value;
+  if (newPass && newPass !== newPass2) { toast('两次输入的新密码不一致', 'error'); return; }
+  if (!newUser && !newPass) { toast('未做任何修改', 'warning'); return; }
+
+  // Try server update
+  if (useApi && socketConnected) {
+    try {
+      var resp = await fetch(API_BASE + '/api/auth/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: curPass, newUsername: newUser, newPassword: newPass })
+      });
+      if (resp.ok) {
+        if (newUser) auth.username = newUser;
+        if (newPass) auth.password = newPass;
+        saveAuth(auth);
+        toast('账号信息已更新！', 'success');
+        navigateTo('account');
+        return;
+      }
+    } catch(e) { console.warn('Server auth update failed:', e); }
+  }
+
+  // Local fallback
+  if (newUser) auth.username = newUser;
+  if (newPass) auth.password = newPass;
+  saveAuth(auth);
+  try { localStorage.setItem('teacher_workbench_loggedin', '1'); } catch(e) {}
+  window._teacher_loggedin = true;
+  toast('账号信息已更新！（本地）', 'success');
+  navigateTo('account');
+}
+
+async function resetCredentials() {
+  if (!confirm('确定要恢复为默认用户名和密码吗？\n用户名：' + DEFAULT_USER + '\n密码：' + DEFAULT_PASS)) return;
+  saveAuth({ username: DEFAULT_USER, password: DEFAULT_PASS });
+
+  if (useApi && socketConnected) {
+    try { await fetch(API_BASE + '/api/auth/reset', { method: 'POST' }); } catch(e) {}
+  }
+
+  try { localStorage.setItem('teacher_workbench_loggedin', '1'); } catch(e) {}
+  window._teacher_loggedin = true;
+  toast('已恢复默认账号', 'success');
+  navigateTo('account');
+}
+
+function getDefaultData() {
+  return {
+    classInfo: { className: '七年级(1)班', grade: '七年级', classNum: '1', headTeacher: '', totalStudents: 45, maleCount: 23, femaleCount: 22 },
+    classSchedule: { periods: ['早读','第一节','第二节','第三节','第四节','午休','第五节','第六节','第七节','第八节'],
+      periodTimes: ['7:30-8:00','8:10-8:55','9:05-9:50','10:10-10:55','11:05-11:50','12:00-13:50','14:00-14:45','14:55-15:40','15:50-16:35','16:45-17:30'],
+      monday: ['语文','数学','英语','历史','体育','','物理','化学','自习','自习'],
+      tuesday: ['英语','语文','数学','政治','生物','','体育','音乐','美术','自习'],
+      wednesday: ['数学','英语','语文','物理','化学','','历史','地理','自习','自习'],
+      thursday: ['语文','物理','数学','英语','化学','','生物','体育','政治','自习'],
+      friday: ['英语','数学','语文','历史','地理','','音乐','美术','班会','自习']
+    },
+    students: [
+      { id:1,name:'张明',idNumber:'',phone:'13800001001',address:'阳光小区1-101',parentName:'张建国',parentPhone:'13900001001',role:'班长',other:''},
+      { id:2,name:'李华',idNumber:'',phone:'13800001002',address:'阳光小区2-202',parentName:'李志强',parentPhone:'13900001002',role:'学习委员',other:''},
+      { id:3,name:'王芳',idNumber:'',phone:'13800001003',address:'阳光小区3-303',parentName:'王伟',parentPhone:'13900001003',role:'',other:''},
+      { id:4,name:'刘洋',idNumber:'',phone:'13800001004',address:'阳光小区4-404',parentName:'刘国栋',parentPhone:'13900001004',role:'体育委员',other:''},
+      { id:5,name:'陈静',idNumber:'',phone:'13800001005',address:'阳光小区5-505',parentName:'陈志明',parentPhone:'13900001005',role:'',other:''}
+    ],
+    seating: { rows:6, cols:8, seats:{} },
+    attendance: {},
+    grades: { exams: [] },
+    classMeetings: [],
+    parentCommunications: [],
+    behaviorRecords: [],
+    classFees: { balance: 0, records: [], invoices: [] },
+    personalSchedule: { periods: ['早读','第一节','第二节','第三节','第四节','午休','第五节','第六节','第七节','第八节'],
+      periodTimes: ['7:30-8:00','8:10-8:55','9:05-9:50','10:10-10:55','11:05-11:50','12:00-13:50','14:00-14:45','14:55-15:40','15:50-16:35','16:45-17:30'],
+      monday: ['','','','','','','','','',''],
+      tuesday: ['','','','','','','','','',''],
+      wednesday: ['','','','','','','','','',''],
+      thursday: ['','','','','','','','','',''],
+      friday: ['','','','','','','','','','']
+    },
+    teachingClasses: [
+      { id:1, name:'七年级(1)班', subject:'数学', grades:[], progress:[], schedule:{} }
+    ],
+    notifications: [],
+    workPlan: {}
+  };
+}
+
+let appData = getDefaultData();
+let currentPage = 'dashboard';
+
+// ============ INDEXEDDB OFFLINE STORAGE ============
+const IDB_NAME = 'teacher_workbench_db';
+const IDB_VERSION = 2;
+let idb = null;
+
+function openIDB() {
+  return new Promise(function(resolve, reject) {
+    if (idb) { resolve(idb); return; }
+    var req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = function(e) {
+      var db = e.target.result;
+      if (!db.objectStoreNames.contains('data')) {
+        db.createObjectStore('data', { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains('syncQueue')) {
+        var sq = db.createObjectStore('syncQueue', { keyPath: 'id', autoIncrement: true });
+        sq.createIndex('timestamp', 'timestamp', { unique: false });
+      }
+      if (!db.objectStoreNames.contains('auth')) {
+        db.createObjectStore('auth', { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains('settings')) {
+        db.createObjectStore('settings', { keyPath: 'key' });
+      }
+    };
+    req.onsuccess = function(e) { idb = e.target.result; resolve(idb); };
+    req.onerror = function(e) { reject(e.target.error); };
+  });
+}
+
+function idbPut(storeName, data) {
+  return openIDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(storeName, 'readwrite');
+      var store = tx.objectStore(storeName);
+      var req = store.put(data);
+      req.onsuccess = function() { resolve(); };
+      req.onerror = function(e) { reject(e.target.error); };
+    });
+  });
+}
+
+function idbGet(storeName, key) {
+  return openIDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(storeName, 'readonly');
+      var store = tx.objectStore(storeName);
+      var req = store.get(key);
+      req.onsuccess = function(e) { resolve(e.target.result); };
+      req.onerror = function(e) { reject(e.target.error); };
+    });
+  });
+}
+
+function idbGetAll(storeName) {
+  return openIDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(storeName, 'readonly');
+      var store = tx.objectStore(storeName);
+      var req = store.getAll();
+      req.onsuccess = function(e) { resolve(e.target.result); };
+      req.onerror = function(e) { reject(e.target.error); };
+    });
+  });
+}
+
+function idbDelete(storeName, key) {
+  return openIDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(storeName, 'readwrite');
+      var store = tx.objectStore(storeName);
+      var req = store.delete(key);
+      req.onsuccess = function() { resolve(); };
+      req.onerror = function(e) { reject(e.target.error); };
+    });
+  });
+}
+
+function idbClear(storeName) {
+  return openIDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(storeName, 'readwrite');
+      var store = tx.objectStore(storeName);
+      var req = store.clear();
+      req.onsuccess = function() { resolve(); };
+      req.onerror = function(e) { reject(e.target.error); };
+    });
+  });
+}
+
+// ============ ONLINE/OFFLINE DETECTION ============
+let isOnline = navigator.onLine;
+
+function updateOnlineStatus() {
+  isOnline = navigator.onLine;
+  var indicator = document.getElementById('offlineIndicator');
+  if (indicator) {
+    indicator.className = isOnline ? 'offline-indicator' : 'offline-indicator show';
+  }
+  if (isOnline && socketConnected) {
+    updateSyncStatus('online');
+    processSyncQueue();
+  } else if (isOnline) {
+    updateSyncStatus('disconnected');
+  } else {
+    updateSyncStatus('offline');
+  }
+}
+
+window.addEventListener('online', function() {
+  console.log('[APP] Online - syncing...');
+  updateOnlineStatus();
+  // Reconnect socket if needed, then sync
+  if (!socketConnected && typeof io !== 'undefined') {
+    connectSocket();
+  }
+  // Wait for socket to reconnect, then process queue
+  var retries = 0;
+  var trySync = setInterval(function() {
+    retries++;
+    if (socketConnected || retries > 20) {
+      clearInterval(trySync);
+      processSyncQueue();
+    }
+  }, 300);
+});
+window.addEventListener('offline', function() {
+  console.log('[APP] Offline - working locally');
+  updateOnlineStatus();
+});
+
+async function manualRefresh() {
+  var btn = document.getElementById('syncRefreshBtn');
+  if (!btn || btn.classList.contains('refreshing')) return;
+
+  btn.classList.add('refreshing');
+  btn.textContent = '⟳ 刷新中...';
+  btn.disabled = true;
+
+  try {
+    // Pull from server (server is authoritative - replace local data)
+    var loaded = await loadFromServer(true);
+    if (loaded) {
+      _lastSyncTime = new Date();
+      updateSyncTime();
+      updateSyncStatus('online');
+      toast('✅ 刷新完成 · 已同步最新数据', 'success');
+    } else if (isOnline) {
+      updateSyncStatus('disconnected');
+      toast('⚠️ 无法连接服务器，使用本地数据', 'warning');
+    } else {
+      updateSyncStatus('offline');
+      toast('⚠️ 离线状态，使用本地数据', 'warning');
+    }
+  } catch(e) {
+    toast('❌ 刷新失败: ' + e.message, 'error');
+  }
+
+  btn.classList.remove('refreshing');
+  btn.textContent = '⟳ 刷新';
+  btn.disabled = false;
+}
+async function queueSync(field, value) {
+  try {
+    var entry = {
+      field: field,
+      value: value,
+      timestamp: new Date().toISOString(),
+      type: 'field_update'
+    };
+    await idbPut('syncQueue', entry);
+    console.log('[SYNC] Queued:', field);
+  } catch(e) { console.warn('[SYNC] Failed to queue:', e); }
+}
+
+async function processSyncQueue() {
+  if (!isOnline || !socketConnected) { console.log('[SYNC] Not online, skipping'); return; }
+  try {
+    var queue = await idbGetAll('syncQueue');
+    if (!queue || queue.length === 0) return;
+    console.log('[SYNC] Processing ' + queue.length + ' queued items...');
+
+    // Sort by timestamp
+    queue.sort(function(a, b) { return a.timestamp < b.timestamp ? -1 : 1; });
+
+    var successIds = [];
+    for (var i = 0; i < queue.length; i++) {
+      var item = queue[i];
+      try {
+        if (item.field === 'full') {
+          // Full data sync: POST to server (authoritative overwrite)
+          var resp = await fetch(API_BASE + '/api/data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(item.value)
+          });
+          if (!resp.ok) throw new Error('Server rejected full sync');
+        } else if (item.field && item.value !== undefined) {
+          socket.emit('update_field', { field: item.field, value: item.value });
+        }
+        successIds.push(item.id);
+      } catch(e) { console.warn('[SYNC] Failed to sync item', item.id, e); }
+    }
+
+    // Remove synced items
+    for (var j = 0; j < successIds.length; j++) {
+      await idbDelete('syncQueue', successIds[j]);
+    }
+    console.log('[SYNC] Synced ' + successIds.length + ' items');
+    if (successIds.length > 0) toast('✅ 已同步 ' + successIds.length + ' 条数据', 'success');
+  } catch(e) { console.warn('[SYNC] Error:', e); }
+}
+
+// ============ DATA LAYER ============
+// saveDataLocal — save to IndexedDB only (for local crash-recovery, does NOT sync to server)
+// Server push happens ONLY when user clicks "保存" button
+async function saveDataLocal(skipFlag) {
+  try {
+    await idbPut('data', { key: 'appData', value: appData });
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
+    if (!skipFlag) { _hasUnsavedChanges = true; updateSaveButton(); }
+  } catch(e) { console.warn('Failed to save local:', e); }
+}
+
+// Alias: keep old function name for compatibility with all data-modification code
+var saveData = saveDataLocal;
+
+// doManualSave — explicit save: persist locally + push full data to server
+async function doManualSave() {
+  var btn = document.getElementById('syncSaveBtn');
+  var fab = document.getElementById('mobileSaveFab');
+  if (!btn || btn.classList.contains('saving')) return;
+  btn.classList.add('saving');
+  btn.textContent = '⏳ 保存中...';
+  if (fab) { fab.classList.add('saving'); fab.textContent = '⏳ 保存中...'; }
+
+  // 1. Always save to IndexedDB first
+  try {
+    await idbPut('data', { key: 'appData', value: appData });
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
+  } catch(e) { console.warn('Local save failed:', e); }
+
+  // 2. Push to server if online
+  var saved = false;
+  if (useApi && isOnline) {
+    try {
+      var resp = await fetch(API_BASE + '/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(appData)
+      });
+      saved = resp.ok;
+    } catch(e) { console.warn('Server save failed:', e); }
+  }
+
+  if (saved) {
+    _lastSyncTime = new Date();
+    _hasUnsavedChanges = false;
+    updateSyncTime();
+    updateSaveButton();
+    toast('✅ 保存成功 · 已同步到服务器', 'success');
+  } else if (isOnline) {
+    await queueSync('full', appData);
+    _hasUnsavedChanges = true;
+    updateSaveButton();
+    toast('⚠️ 服务器不可用 · 已暂存本地', 'warning');
+  } else {
+    await queueSync('full', appData);
+    _hasUnsavedChanges = true;
+    updateSaveButton();
+    toast('💾 已保存到本地 · 连接后将自动同步', 'success');
+  }
+
+  btn.textContent = '💾 保存';
+  btn.classList.remove('saving');
+  if (fab) { fab.classList.remove('saving'); fab.textContent = '💾 保存到服务器'; }
+}
+
+function updateSaveButton() {
+  var btn = document.getElementById('syncSaveBtn');
+  var fab = document.getElementById('mobileSaveFab');
+  if (_hasUnsavedChanges) {
+    if (btn) { btn.classList.add('has-unsaved'); btn.title = '有未保存的更改，点击保存到服务器'; }
+    if (fab) { fab.classList.add('has-unsaved'); fab.textContent = '⚠️ 保存到服务器'; }
+  } else {
+    if (btn) { btn.classList.remove('has-unsaved'); btn.title = '已同步到服务器'; }
+    if (fab) { fab.classList.remove('has-unsaved'); fab.textContent = '💾 保存到服务器'; }
+  }
+}
+
+async function loadFromServer(forceReplace) {
+  if (!useApi) return false;
+  try {
+    var resp = await fetch(API_BASE + '/api/data');
+    if (resp.ok) {
+      var data = await resp.json();
+      if (data && typeof data === 'object') {
+        if (forceReplace) {
+          // Server is authoritative: replace local, fill missing keys from defaults
+          appData = deepMerge(getDefaultData(), data);
+        } else {
+          // Keep local changes that haven't been pushed, merge in server updates
+          appData = deepMerge(appData, data);
+        }
+        // Auto-repair any inflated schedule arrays from server
+        trimSchedule(appData.classSchedule);
+        trimSchedule(appData.personalSchedule);
+        _lastSyncTime = new Date();
+        await saveDataLocal();
+        _hasUnsavedChanges = false;
+        updateSaveButton();
+        refreshCurrentPage();
+      }
+      return true;
+    }
+  } catch(e) { console.warn('Failed to load from server:', e); }
+  return false;
+}
+
+// ============ PWA INSTALL ============
+let deferredPrompt = null;
+
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById('pwaInstallBanner').style.display = 'flex';
+});
+
+window.addEventListener('appinstalled', function() {
+  deferredPrompt = null;
+  document.getElementById('pwaInstallBanner').style.display = 'none';
+  toast('✅ 应用已安装到桌面！', 'success');
+});
+
+function installPWA() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(function(result) {
+      if (result.outcome === 'accepted') {
+        console.log('[PWA] User accepted install');
+      }
+      deferredPrompt = null;
+      document.getElementById('pwaInstallBanner').style.display = 'none';
+    });
+  }
+}
+
+function dismissPWAInstall() {
+  document.getElementById('pwaInstallBanner').style.display = 'none';
+}
+
+// ============ PWA PLATFORM DETECTION & MANUAL INSTALL ============
+function getPlatform() {
+  var ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua)) return 'ios';
+  if (/Android/.test(ua)) return 'android';
+  return 'other';
+}
+
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches ||
+         window.navigator.standalone === true;
+}
+
+function shouldShowInstallUI() {
+  return !isStandalone() && (getPlatform() === 'ios' || getPlatform() === 'android');
+}
+
+function showPWAGuide() {
+  var platform = getPlatform();
+  var steps = '';
+  if (platform === 'ios') {
+    steps = `
+      <div class="step"><div class="step-num">1</div><div class="step-text">点击 Safari 底部/顶部的 <strong>分享按钮</strong>（<span style="font-size:18px;">⎋</span>）</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">在分享菜单中向上滑动，找到并点击 <strong>"添加到主屏幕"</strong></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">点击右上角 <strong>"添加"</strong> 完成安装</div></div>
+      <div class="note">💡 安装后，桌面会出现"班主任工作台"图标，点击即可全屏打开，无需每次输入网址。</div>`;
+  } else if (platform === 'android') {
+    steps = `
+      <div class="step"><div class="step-num">1</div><div class="step-text">点击 Chrome 右上角 <strong>菜单（⋮）</strong></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">选择 <strong>"添加到主屏幕"</strong> 或 <strong>"安装应用"</strong></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-text">在弹窗中点击 <strong>"添加"</strong> 或 <strong>"安装"</strong></div></div>
+      <div class="note">💡 如果看不到安装选项，说明当前是通过 HTTP 访问。可以改用 Chrome 菜单 → "添加到主屏幕"，效果相同。</div>`;
+  } else {
+    steps = `
+      <div class="step"><div class="step-num">1</div><div class="step-text">点击浏览器菜单</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-text">查找 <strong>"安装应用"</strong> 或 <strong>"添加到主屏幕"</strong> 选项</div></div>
+      <div class="note">💡 不同浏览器名称可能不同，常见有：创建快捷方式、固定到开始屏幕、添加到主屏幕等。</div>`;
+  }
+
+  var html = `
+    <div class="pwa-guide-overlay" id="pwaGuideOverlay" onclick="if(event.target===this)closePWAGuide()">
+      <div class="pwa-guide-modal">
+        <h3>📲 安装到桌面</h3>
+        <p style="font-size:13px;color:var(--text-light);margin-bottom:12px;">安装后无需输入网址，像APP一样使用，支持离线查看。</p>
+        ${steps}
+        <button class="btn btn-primary" style="margin-top:16px;width:100%;" onclick="closePWAGuide()">知道了</button>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closePWAGuide() {
+  var o = document.getElementById('pwaGuideOverlay');
+  if (o) o.remove();
+}
+
+function updateInstallUI() {
+  // Login page install help
+  var loginHelp = document.getElementById('loginInstallHelp');
+  var platformBadge = document.getElementById('installPlatformBadge');
+  var steps = document.getElementById('installSteps');
+  if (loginHelp && shouldShowInstallUI()) {
+    loginHelp.style.display = 'block';
+    var platform = getPlatform();
+    if (platformBadge) platformBadge.textContent = platform === 'ios' ? 'iPhone / iPad' : 'Android';
+    if (steps) {
+      if (platform === 'ios') {
+        steps.innerHTML = '<li>点击 Safari 底部的 <strong>分享按钮 ⎋</strong></li><li>选择「添加到主屏幕」</li><li>点击「添加」完成</li>';
+      } else {
+        steps.innerHTML = '<li>点击 Chrome 右上角 <strong>菜单 ⋮</strong></li><li>选择「添加到主屏幕」或「安装应用」</li><li>点击「添加」完成</li>';
+      }
+    }
+  }
+
+  // Floating FAB in app
+  var fab = document.getElementById('installFab');
+  if (fab && shouldShowInstallUI()) {
+    fab.style.display = 'flex';
+  }
+}
+
+// ============ SERVICE WORKER REGISTRATION ============
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js').then(function(reg) {
+      console.log('[SW] Registered:', reg.scope);
+    }).catch(function(err) {
+      console.warn('[SW] Registration failed:', err);
+    });
+  });
+}
+
+function refreshCurrentPage() {
+  if (currentPage) navigateTo(currentPage);
+}
+
+function deepMerge(target, source) {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    if (source[key] !== null && typeof source[key] === 'object' && !Array.isArray(source[key]) && target[key] !== null && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+      result[key] = deepMerge(target[key], source[key]);
+    } else {
+      result[key] = source[key];
+    }
+  }
+  return result;
+}
+
+// ============ UTILS ============
+// Trim schedule arrays to periods.length (defense against array inflation bug)
+function trimSchedule(sched) {
+  if (!sched || !sched.periods) return;
+  var maxLen = sched.periods.length;
+  var weekKeysArr = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+  // Trim periodTimes
+  if (sched.periodTimes && sched.periodTimes.length > maxLen) {
+    sched.periodTimes = sched.periodTimes.slice(0, maxLen);
+  }
+  // Trim each weekday array
+  weekKeysArr.forEach(function(wk) {
+    if (sched[wk] && Array.isArray(sched[wk]) && sched[wk].length > maxLen) {
+      sched[wk] = sched[wk].slice(0, maxLen);
+    }
+  });
+}
+
+function toast(msg, type='info') {
+  const c = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { t.remove(); }, 2500);
+}
+
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function tomorrow() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function getTomorrowWeekKey() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const wd = d.getDay();
+  if (wd >= 1 && wd <= 5) return weekKeys[wd-1];
+  return 'monday';
+}
+
+function formatDate(d) {
+  return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+}
+
+function getWeekDay() {
+  const days = ['日','一','二','三','四','五','六'];
+  return days[new Date().getDay()];
+}
+
+const weekKeys = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+
+function getTodayWeekKey() {
+  const d = new Date().getDay();
+  if (d >= 1 && d <= 5) return weekKeys[d-1];
+  return 'monday';
+}
+
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
+
+// ============ NAVIGATION ============
+function setupNavigation() {
+  $$('.nav-item').forEach(item => {
+    item.addEventListener('click', function() {
+      $$('.nav-item').forEach(i => i.classList.remove('active'));
+      this.classList.add('active');
+      const page = this.dataset.page;
+      navigateTo(page);
+      // Auto-close mobile nav
+      closeMobileNav();
+    });
+  });
+}
+
+// ============ MOBILE NAV ============
+function toggleMobileNav() {
+  var sidebar = document.querySelector('.sidebar');
+  var overlay = document.getElementById('sidebarOverlay');
+  if (sidebar.classList.contains('open')) {
+    closeMobileNav();
+  } else {
+    sidebar.classList.add('open');
+    overlay.classList.add('show');
+  }
+}
+
+function closeMobileNav() {
+  var sidebar = document.querySelector('.sidebar');
+  var overlay = document.getElementById('sidebarOverlay');
+  sidebar.classList.remove('open');
+  overlay.classList.remove('show');
+}
+
+function navigateTo(page) {
+  currentPage = page;
+  let html = '';
+  switch(page) {
+    case 'dashboard': html = renderDashboard(); break;
+    case 'class-info': html = renderClassInfo(); break;
+    case 'class-schedule': html = renderClassSchedule(); break;
+    case 'students': html = renderStudents(); break;
+    case 'seating': html = renderSeating(); break;
+    case 'attendance': html = renderAttendance(); break;
+    case 'grades': html = renderGrades(); break;
+    case 'meetings': html = renderMeetings(); break;
+    case 'parent-comm': html = renderParentComm(); break;
+    case 'behavior': html = renderBehavior(); break;
+    case 'fees': html = renderFees(); break;
+    case 'my-schedule': html = renderMySchedule(); break;
+    case 'teaching-classes': html = renderTeachingClasses(); break;
+    case 'notifications': html = renderNotifications(); break;
+    case 'account': html = renderAccount(); break;
+  }
+  document.getElementById('mainContent').innerHTML = html;
+  // Re-bind events after render
+  setTimeout(() => bindPageEvents(page), 50);
+}
+
+// ============ DASHBOARD ============
+function renderDashboard() {
+  const t = today();
+  const tm = tomorrow();
+  const tk = getTodayWeekKey();
+  const tmk = getTomorrowWeekKey();
+
+  // Today's work plan
+  const plans = appData.workPlan[t] || [];
+  let planHTML = plans.length === 0
+    ? '<div class="empty-state"><div class="empty-icon">📋</div><p>暂无今日工作计划，点击下方添加</p></div>'
+    : plans.map((p, i) => `<div class="plan-item">
+        <div class="checkbox ${p.done?'done':''}" data-plan-idx="${i}" data-plan-date="${t}" data-plan-action="toggle"></div>
+        <span class="plan-text ${p.done?'done-text':''}">${escapeHtml(p.text)}</span>
+        <button class="btn btn-sm btn-ghost" data-plan-idx="${i}" data-plan-date="${t}" data-plan-action="delete">×</button>
+      </div>`).join('');
+
+  // Tomorrow's work plan
+  const tmPlans = appData.workPlan[tm] || [];
+  let tmPlanHTML = tmPlans.length === 0
+    ? '<div class="empty-state"><div class="empty-icon">📋</div><p>暂无明日工作计划，点击下方添加</p></div>'
+    : tmPlans.map((p, i) => `<div class="plan-item">
+        <div class="checkbox ${p.done?'done':''}" data-plan-idx="${i}" data-plan-date="${tm}" data-plan-action="toggle"></div>
+        <span class="plan-text ${p.done?'done-text':''}">${escapeHtml(p.text)}</span>
+        <button class="btn btn-sm btn-ghost" data-plan-idx="${i}" data-plan-date="${tm}" data-plan-action="delete">×</button>
+      </div>`).join('');
+
+  // Today's class schedule (from classSchedule)
+  const cs = appData.classSchedule[tk] || [];
+  const csPeriods = (appData.classSchedule.periods || []).slice(0, 10); // Cap to prevent performance issues
+  const csTimes = appData.classSchedule.periodTimes || [];
+  let csHTML = '';
+  const csItems = [];
+  csPeriods.forEach((p, i) => {
+    const val = (cs[i] || '').trim();
+    if (val) csItems.push({ period: p, time: csTimes[i] || '', course: val });
+  });
+  if (csItems.length === 0) {
+    csHTML = '<tr><td colspan="3" style="text-align:center;padding:20px;color:#999;">今日暂无课程安排</td></tr>';
+  } else {
+    csItems.forEach(item => {
+      csHTML += `<tr><td style="font-weight:500;">${escapeHtml(item.period)}</td><td style="color:var(--text-light);">${escapeHtml(item.time)}</td><td><strong>${escapeHtml(item.course)}</strong></td></tr>`;
+    });
+  }
+
+  // Today's personal schedule
+  const ps = appData.personalSchedule[tk] || [];
+  const psPeriods = (appData.personalSchedule.periods || []).slice(0, 10); // Cap to prevent performance issues
+  const psTimes = appData.personalSchedule.periodTimes || [];
+  let psHTML = '';
+  const psItems = [];
+  psPeriods.forEach((p, i) => {
+    const val = (ps[i] || '').trim();
+    if (val) psItems.push({ period: p, time: psTimes[i] || '', course: val });
+  });
+  if (psItems.length === 0) {
+    psHTML = '<tr><td colspan="3" style="text-align:center;padding:20px;color:#999;">今日暂无个人课程安排</td></tr>';
+  } else {
+    psItems.forEach(item => {
+      psHTML += `<tr><td style="font-weight:500;">${escapeHtml(item.period)}</td><td style="color:var(--text-light);">${escapeHtml(item.time)}</td><td><strong>${escapeHtml(item.course)}</strong></td></tr>`;
+    });
+  }
+
+  // Today's attendance summary
+  const todayRecords = appData.attendance[t] || {};
+  const lateStudents = [];
+  const leaveStudents = [];
+  const absentStudents = [];
+  const studentMap = {};
+  appData.students.forEach(s => { studentMap[s.id] = s; });
+  Object.keys(todayRecords).forEach(sid => {
+    const st = studentMap[parseInt(sid)];
+    if (!st) return;
+    if (todayRecords[sid] === 'late') lateStudents.push(st);
+    else if (todayRecords[sid] === 'leave') leaveStudents.push(st);
+    else if (todayRecords[sid] === 'absent') absentStudents.push(st);
+  });
+
+  let attSummaryHTML = '';
+  if (lateStudents.length === 0 && leaveStudents.length === 0 && absentStudents.length === 0) {
+    attSummaryHTML = '<div class="empty-state"><div class="empty-icon">✅</div><p>今日全班出勤正常</p></div>';
+  } else {
+    const items = [];
+    if (leaveStudents.length > 0) {
+      items.push(`<div class="att-summary-row"><span class="att-badge leave">请假 ${leaveStudents.length}人</span><span>${leaveStudents.map(s => escapeHtml(s.name)).join('、')}</span></div>`);
+    }
+    if (lateStudents.length > 0) {
+      items.push(`<div class="att-summary-row"><span class="att-badge late">迟到 ${lateStudents.length}人</span><span>${lateStudents.map(s => escapeHtml(s.name)).join('、')}</span></div>`);
+    }
+    if (absentStudents.length > 0) {
+      items.push(`<div class="att-summary-row"><span class="att-badge absent">缺勤 ${absentStudents.length}人</span><span>${absentStudents.map(s => escapeHtml(s.name)).join('、')}</span></div>`);
+    }
+    attSummaryHTML = items.join('');
+  }
+
+  return `
+    <div class="header">
+      <h1>📊 工作台仪表盘</h1>
+      <span class="date">${formatDate(new Date())} 星期${getWeekDay()}</span>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3><span class="card-icon">✅</span>今日考勤情况</h3></div>
+      <div>${attSummaryHTML}</div>
+    </div>
+    <div class="grid-2">
+      <div>
+        <div class="card">
+          <div class="card-header">
+            <h3><span class="card-icon">📋</span>今日工作计划</h3>
+            <button class="btn btn-sm btn-primary" onclick="addWorkPlan('${t}')">+ 添加任务</button>
+          </div>
+          <div>${planHTML}</div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-header">
+            <h3><span class="card-icon">📝</span>明日工作计划</h3>
+            <button class="btn btn-sm btn-outline" onclick="addWorkPlan('${tm}')">+ 添加任务</button>
+          </div>
+          <div>${tmPlanHTML}</div>
+        </div>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div>
+        <div class="card">
+          <div class="card-header"><h3><span class="card-icon">📅</span>今日班级课程表</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>时段</th><th>时间</th><th>课程</th></tr></thead>
+            <tbody>${csHTML}</tbody>
+          </table></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="card-header"><h3><span class="card-icon">🗓️</span>今日个人课程表</h3></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>时段</th><th>时间</th><th>课程</th></tr></thead>
+            <tbody>${psHTML}</tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function addWorkPlan(date) {
+  const label = date === today() ? '今日' : (date === tomorrow() ? '明日' : date);
+  const text = prompt(`请输入${label}工作计划内容：`);
+  if (!text) return;
+  if (!appData.workPlan[date]) appData.workPlan[date] = [];
+  appData.workPlan[date].push({ text, done: false });
+  saveData();
+  navigateTo('dashboard');
+}
+
+function toggleWorkPlan(date, idx) {
+  if (appData.workPlan[date] && appData.workPlan[date][idx]) {
+    appData.workPlan[date][idx].done = !appData.workPlan[date][idx].done;
+    saveData();
+    navigateTo('dashboard');
+  }
+}
+
+function deleteWorkPlan(date, idx) {
+  if (appData.workPlan[date]) {
+    appData.workPlan[date].splice(idx, 1);
+    saveData();
+    navigateTo('dashboard');
+  }
+}
+
+// ============ CLASS INFO ============
+function renderClassInfo() {
+  const ci = appData.classInfo;
+  return `
+    <div class="header"><h1>🏫 班级总体信息</h1></div>
+    <div class="card">
+      <div class="card-header"><h3>基本信息</h3></div>
+      <div class="grid-2">
+        <div class="form-group"><label>班级名称</label><input id="ci-className" value="${escapeHtml(ci.className)}"></div>
+        <div class="form-group"><label>年级</label><input id="ci-grade" value="${escapeHtml(ci.grade)}"></div>
+        <div class="form-group"><label>班主任</label><input id="ci-headTeacher" value="${escapeHtml(ci.headTeacher||'')}"></div>
+        <div class="form-group"><label>班级编号</label><input id="ci-classNum" value="${escapeHtml(ci.classNum)}"></div>
+        <div class="form-group"><label>班级总人数</label><input type="number" id="ci-total" value="${ci.totalStudents}" onchange="autoCalcGender()"></div>
+        <div class="form-group"><label>男生人数</label><input type="number" id="ci-male" value="${ci.maleCount}" onchange="autoCalcFemale()"></div>
+        <div class="form-group"><label>女生人数</label><input type="number" id="ci-female" value="${ci.femaleCount}"></div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="saveClassInfo()">💾 保存信息</button>
+    </div>
+  `;
+}
+
+function saveClassInfo() {
+  appData.classInfo.className = document.getElementById('ci-className').value;
+  appData.classInfo.grade = document.getElementById('ci-grade').value;
+  appData.classInfo.headTeacher = document.getElementById('ci-headTeacher').value;
+  appData.classInfo.classNum = document.getElementById('ci-classNum').value;
+  appData.classInfo.totalStudents = parseInt(document.getElementById('ci-total').value) || 0;
+  appData.classInfo.maleCount = parseInt(document.getElementById('ci-male').value) || 0;
+  appData.classInfo.femaleCount = parseInt(document.getElementById('ci-female').value) || 0;
+  saveData();
+  toast('班级信息已保存', 'success');
+}
+
+function autoCalcGender() {
+  const t = parseInt(document.getElementById('ci-total').value) || 0;
+  const m = parseInt(document.getElementById('ci-male').value) || 0;
+  if (t >= m) document.getElementById('ci-female').value = t - m;
+}
+
+function autoCalcFemale() {
+  const t = parseInt(document.getElementById('ci-total').value) || 0;
+  const f = parseInt(document.getElementById('ci-female').value) || 0;
+  if (t >= f) document.getElementById('ci-male').value = t - f;
+}
+
+// ============ CLASS SCHEDULE ============
+function renderClassSchedule() {
+  const cs = appData.classSchedule;
+  const days = ['星期一','星期二','星期三','星期四','星期五'];
+  let html = '<div class="header"><h1>📅 班级课程表</h1><button class="btn btn-outline btn-sm" onclick="exportClassSchedule()">📥 导出CSV</button></div><div class="card"><div class="table-wrap"><table class="schedule-table"><thead><tr><th>时段</th><th>时间</th>';
+  days.forEach(d => html += `<th>${d}</th>`);
+  html += '</tr></thead><tbody>';
+  cs.periods.slice(0, 10).forEach((p, pi) => {
+    const timeVal = (cs.periodTimes && cs.periodTimes[pi]) || '';
+    html += `<tr><td style="font-weight:600;">${escapeHtml(p)}</td><td><input value="${escapeHtml(timeVal)}" data-time-idx="${pi}" class="cs-time-input" style="width:100px;text-align:center;" placeholder="如 8:00-8:45"></td>`;
+    weekKeys.slice(0,5).forEach(wk => {
+      const val = (cs[wk] && cs[wk][pi]) || '';
+      html += `<td><input value="${escapeHtml(val)}" data-week="${wk}" data-period="${pi}" class="cs-input" placeholder=""></td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div><button class="btn btn-primary" style="margin-top:12px;" onclick="saveClassSchedule()">💾 保存课程表</button></div>';
+  return html;
+}
+
+function saveClassSchedule() {
+  var maxIdx = (appData.classSchedule.periods && appData.classSchedule.periods.length) || 10;
+  $$('.cs-input').forEach(inp => {
+    const wk = inp.dataset.week, pi = parseInt(inp.dataset.period);
+    if (pi >= maxIdx) return; // Guard against array inflation
+    if (!appData.classSchedule[wk]) appData.classSchedule[wk] = [];
+    appData.classSchedule[wk][pi] = inp.value;
+  });
+  $$('.cs-time-input').forEach(inp => {
+    const pi = parseInt(inp.dataset.timeIdx);
+    if (pi >= maxIdx) return; // Guard against array inflation
+    if (!appData.classSchedule.periodTimes) appData.classSchedule.periodTimes = [];
+    appData.classSchedule.periodTimes[pi] = inp.value;
+  });
+  trimSchedule(appData.classSchedule);
+  saveData();
+  toast('课程表已保存', 'success');
+}
+
+function exportClassSchedule() {
+  var cs = appData.classSchedule;
+  var days = ['星期一','星期二','星期三','星期四','星期五'];
+  var csv = '\uFEFF时段,' + days.join(',') + '\n';
+  cs.periods.slice(0, 10).forEach(function(p, pi) {
+    var row = [escapeCSV(p)];
+    weekKeys.slice(0,5).forEach(function(wk) { row.push(escapeCSV((cs[wk]&&cs[wk][pi])||'')); });
+    csv += row.join(',') + '\n';
+  });
+  saveFileWithPicker('班级课程表.csv', csv, 'text/csv;charset=utf-8;');
+}
+
+// ============ STUDENTS ============
+function renderStudents() {
+  const fields = [
+    { key:'id', label:'学号', w:'60px' },
+    { key:'name', label:'姓名', w:'70px' },
+    { key:'idNumber', label:'身份证号', w:'150px' },
+    { key:'phone', label:'手机号码', w:'120px' },
+    { key:'address', label:'家庭住址', w:'150px' },
+    { key:'parentName', label:'家长姓名', w:'80px' },
+    { key:'parentPhone', label:'家长联系方式', w:'130px' },
+    { key:'role', label:'职务', w:'90px' },
+    { key:'other', label:'其他', w:'120px' }
+  ];
+
+  let html = `<div class="header">
+    <h1>👥 班级成员信息管理</h1>
+    <div class="btn-group">
+      <button class="btn btn-sm btn-outline" onclick="importStudentsExcel()">📥 导入Excel</button>
+      <button class="btn btn-sm btn-success" onclick="exportStudentsExcel()">📤 导出Excel</button>
+      <button class="btn btn-sm btn-primary" onclick="addStudent()">+ 添加学生</button>
+    </div>
+  </div>
+  <div class="card"><div class="table-wrap">
+  <table><thead><tr>`;
+
+  fields.forEach(f => html += `<th style="width:${f.w}">${f.label}</th>`);
+  html += '<th style="width:70px">操作</th></tr></thead><tbody>';
+
+  appData.students.forEach((s, idx) => {
+    html += '<tr>';
+    fields.forEach(f => {
+      html += `<td><input value="${escapeHtml(s[f.key]||'')}" data-student="${idx}" data-field="${f.key}" class="stu-input"></td>`;
+    });
+    html += `<td><button class="btn btn-sm btn-danger" onclick="deleteStudent(${idx})">删除</button></td></tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  html += `<button class="btn btn-primary" style="margin-top:12px;" onclick="saveStudents()">💾 保存修改</button></div>`;
+  return html;
+}
+
+function addStudent() {
+  const maxId = appData.students.reduce((m, s) => Math.max(m, s.id), 0);
+  appData.students.push({ id: maxId+1, name:'新同学', idNumber:'', phone:'', address:'', parentName:'', parentPhone:'', role:'', other:'' });
+  saveData();
+  navigateTo('students');
+}
+
+function deleteStudent(idx) {
+  if (!confirm('确定删除该学生吗？')) return;
+  appData.students.splice(idx, 1);
+  saveData();
+  navigateTo('students');
+}
+
+function saveStudents() {
+  $$('.stu-input').forEach(inp => {
+    const idx = parseInt(inp.dataset.student);
+    const field = inp.dataset.field;
+    appData.students[idx][field] = field === 'id' ? (parseInt(inp.value) || 0) : inp.value;
+  });
+  saveData();
+  toast('学生信息已保存', 'success');
+}
+
+function exportStudentsExcel() {
+  var ws = XLSX.utils.json_to_sheet(appData.students);
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '学生信息');
+  var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  saveFileWithPicker('班级成员信息.xlsx', wbout, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+function importStudentsExcel() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.xlsx,.xls,.csv';
+  input.onchange = function(e) {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      const wb = XLSX.read(ev.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws);
+      if (data.length > 0) {
+        // Map to our fields
+        const mapped = data.map((row, i) => ({
+          id: row['学号'] || row['id'] || (i+1),
+          name: row['姓名'] || row['name'] || '',
+          idNumber: row['身份证号'] || row['idNumber'] || '',
+          phone: row['手机号码'] || row['phone'] || '',
+          address: row['家庭住址'] || row['address'] || '',
+          parentName: row['家长姓名'] || row['parentName'] || '',
+          parentPhone: row['家长联系方式'] || row['parentPhone'] || '',
+          role: row['职务'] || row['role'] || '',
+          other: row['其他'] || row['other'] || ''
+        }));
+        appData.students = mapped;
+        saveData();
+        navigateTo('students');
+        toast(`成功导入 ${mapped.length} 条学生记录`, 'success');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  input.click();
+}
+
+// ============ SEATING CHART ============
+function renderSeating() {
+  const sc = appData.seating;
+  let html = `
+    <div class="header">
+      <h1>🪑 班级座位表</h1>
+      <div class="btn-group">
+        <button class="btn btn-sm btn-outline" onclick="exportSeatingImage()">📥 导出图片</button>
+        <button class="btn btn-sm btn-primary" onclick="resetSeating()">🔄 重置座位</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="seating-chart-controls">
+        <div class="form-group" style="margin-bottom:0;">
+          <label>行数</label><input type="number" id="seat-rows" value="${sc.rows}" min="2" max="12" style="width:70px;">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label>列数</label><input type="number" id="seat-cols" value="${sc.cols}" min="2" max="12" style="width:70px;">
+        </div>
+        <button class="btn btn-sm btn-outline" onclick="updateSeatingSize()">应用</button>
+      </div>
+      <div style="text-align:center; padding:10px 0; color:var(--text-light); font-size:12px;">🟦 讲台</div>
+      <div style="text-align:center; overflow-x:auto; padding:10px 0;">
+        <div class="seating-grid" style="grid-template-columns: repeat(${sc.cols}, 90px);" id="seatingGrid">`;
+
+  for (let r = 0; r < sc.rows; r++) {
+    for (let c = 0; c < sc.cols; c++) {
+      const key = `${r}-${c}`;
+      const sid = sc.seats[key];
+      const student = sid ? appData.students.find(s => s.id === sid) : null;
+      const cls = student ? 'occupied' : 'empty';
+      const name = student ? student.name : '空位';
+      html += `<div class="seat ${cls}" data-row="${r}" data-col="${c}" data-key="${key}" onclick="openSeatPicker('${key}')">
+        <span class="seat-num">${r+1}-${c+1}</span>
+        ${name}
+      </div>`;
+    }
+  }
+
+  html += `</div></div></div>`;
+  return html;
+}
+
+function openSeatPicker(key) {
+  const current = appData.seating.seats[key] || '';
+  let opts = '<option value="">-- 空位 --</option>';
+  appData.students.forEach(s => {
+    opts += `<option value="${s.id}" ${s.id===current?'selected':''}>${s.name} (${s.id})</option>`;
+  });
+  const html = `
+    <div class="modal-overlay" id="seatPickerOverlay" onclick="if(event.target===this)closeSeatPicker()">
+      <div class="modal">
+        <h3>选择座位学生</h3>
+        <div class="form-group"><label>座位: ${key}</label><select id="seatPickerSelect">${opts}</select></div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="confirmSeatPick('${key}')">确定</button>
+          <button class="btn btn-ghost" onclick="closeSeatPicker()">取消</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeSeatPicker() {
+  const o = document.getElementById('seatPickerOverlay');
+  if (o) o.remove();
+}
+
+function confirmSeatPick(key) {
+  const val = document.getElementById('seatPickerSelect').value;
+  appData.seating.seats[key] = val ? parseInt(val) : null;
+  // Clean null keys
+  if (!val) delete appData.seating.seats[key];
+  saveData();
+  closeSeatPicker();
+  navigateTo('seating');
+}
+
+function updateSeatingSize() {
+  appData.seating.rows = parseInt(document.getElementById('seat-rows').value) || 6;
+  appData.seating.cols = parseInt(document.getElementById('seat-cols').value) || 8;
+  saveData();
+  navigateTo('seating');
+}
+
+function resetSeating() {
+  if (!confirm('确定重置所有座位安排吗？')) return;
+  appData.seating.seats = {};
+  saveData();
+  navigateTo('seating');
+}
+
+function exportSeatingImage() {
+  toast('提示：建议使用浏览器截图功能（Ctrl+Shift+S）保存座位表图片', 'info');
+}
+
+// ============ ATTENDANCE ============
+function renderAttendance() {
+  const date = today();
+  const records = appData.attendance[date] || {};
+  const stats = calcAttendanceStats();
+
+  let html = `
+    <div class="header"><h1>✅ 考勤记录</h1></div>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="num">${appData.students.length}</div><div class="label">总人数</div></div>
+      <div class="stat-card accent"><div class="num">${stats.present}</div><div class="label">今日出勤</div></div>
+      <div class="stat-card"><div class="num">${stats.absent}</div><div class="label">今日缺勤</div></div>
+      <div class="stat-card warn"><div class="num">${stats.late}</div><div class="label">今日迟到</div></div>
+      <div class="stat-card"><div class="num">${stats.leave}</div><div class="label">今日请假</div></div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <h3>今日考勤 - ${date}</h3>
+        <div class="btn-group">
+          <button class="btn btn-sm btn-outline" onclick="batchAttendance('present')">全部出勤</button>
+          <button class="btn btn-sm btn-primary" onclick="saveAttendance()">💾 保存考勤</button>
+          <button class="btn btn-sm btn-outline" onclick="exportAttendance()">📤 导出Excel</button>
+          <button class="btn btn-sm btn-outline" onclick="importAttendance()">📥 导入Excel</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>学号</th><th>姓名</th><th>状态</th></tr></thead><tbody>`;
+
+  appData.students.forEach(s => {
+    const status = records[s.id] || 'present';
+    html += `<tr>
+      <td>${s.id}</td><td>${escapeHtml(s.name)}</td>
+      <td><select class="att-status" data-sid="${s.id}">
+        <option value="present" ${status==='present'?'selected':''}>出勤</option>
+        <option value="absent" ${status==='absent'?'selected':''}>缺勤</option>
+        <option value="late" ${status==='late'?'selected':''}>迟到</option>
+        <option value="leave" ${status==='leave'?'selected':''}>请假</option>
+      </select></td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div></div>';
+
+  // Monthly stats
+  html += `<div class="card">
+    <div class="card-header"><h3>本月考勤统计</h3></div>
+    <div class="table-wrap"><table><thead><tr><th>姓名</th><th>出勤</th><th>缺勤</th><th>迟到</th><th>请假</th><th>出勤率</th></tr></thead><tbody>`;
+
+  const monthStats = calcMonthlyAttendanceStats();
+  appData.students.forEach(s => {
+    const ms = monthStats[s.id] || { present: 0, absent: 0, late: 0, leave: 0 };
+    const total = ms.present + ms.absent + ms.late + ms.leave;
+    const rate = total > 0 ? ((ms.present) / total * 100).toFixed(1) : '0.0';
+    html += `<tr><td>${escapeHtml(s.name)}</td><td>${ms.present}</td><td>${ms.absent}</td><td>${ms.late}</td><td>${ms.leave}</td><td>${rate}%</td></tr>`;
+  });
+
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+function calcAttendanceStats() {
+  const date = today();
+  const records = appData.attendance[date] || {};
+  const stats = { present: 0, absent: 0, late: 0, leave: 0 };
+  appData.students.forEach(s => {
+    const status = records[s.id] || 'present';
+    stats[status] = (stats[status] || 0) + 1;
+  });
+  return stats;
+}
+
+function calcMonthlyAttendanceStats() {
+  const month = today().substring(0, 7);
+  const result = {};
+  Object.keys(appData.attendance).forEach(date => {
+    if (date.startsWith(month)) {
+      const records = appData.attendance[date];
+      Object.keys(records).forEach(sid => {
+        const id = parseInt(sid);
+        if (!result[id]) result[id] = { present: 0, absent: 0, late: 0, leave: 0 };
+        result[id][records[sid]] = (result[id][records[sid]] || 0) + 1;
+      });
+    }
+  });
+  return result;
+}
+
+function batchAttendance(status) {
+  const date = today();
+  if (!appData.attendance[date]) appData.attendance[date] = {};
+  appData.students.forEach(s => {
+    appData.attendance[date][s.id] = status;
+  });
+  saveData();
+  navigateTo('attendance');
+}
+
+function saveAttendance() {
+  const date = today();
+  if (!appData.attendance[date]) appData.attendance[date] = {};
+  $$('.att-status').forEach(sel => {
+    appData.attendance[date][parseInt(sel.dataset.sid)] = sel.value;
+  });
+  saveData();
+  toast('考勤记录已保存', 'success');
+}
+
+function exportAttendance() {
+  var month = today().substring(0, 7);
+  var csv = '\uFEFF姓名,';
+  var dates = Object.keys(appData.attendance).filter(function(d) { return d.startsWith(month); }).sort();
+  dates.forEach(function(d) { csv += d + ','; });
+  csv += '出勤,缺勤,迟到,请假,出勤率\n';
+  var monthStats = calcMonthlyAttendanceStats();
+  var statusMap = { present: '出勤', absent: '缺勤', late: '迟到', leave: '请假' };
+  appData.students.forEach(function(s) {
+    var row = [escapeCSV(s.name)];
+    dates.forEach(function(d) {
+      row.push(escapeCSV(statusMap[(appData.attendance[d]||{})[s.id]] || '出勤'));
+    });
+    var ms = monthStats[s.id] || { present: 0, absent: 0, late: 0, leave: 0 };
+    var total = ms.present + ms.absent + ms.late + ms.leave;
+    row.push(ms.present, ms.absent, ms.late, ms.leave, total > 0 ? (ms.present/total*100).toFixed(1)+'%' : '0.0%');
+    csv += row.join(',') + '\n';
+  });
+  saveFileWithPicker('考勤记录.csv', csv, 'text/csv;charset=utf-8;');
+}
+
+function importAttendance() {
+  var input = document.createElement('input');
+  input.type = 'file'; input.accept = '.xlsx,.xls,.csv';
+  input.onchange = function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      var wb = XLSX.read(ev.target.result, { type: 'array' });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (data.length < 2) { toast('文件格式不正确（至少需要表头+一行数据）', 'error'); return; }
+      var header = data[0];
+      // First column should be 姓名, rest are date columns
+      if (!header[0] || (String(header[0]).indexOf('姓名') === -1 && String(header[0]).indexOf('name') === -1)) {
+        toast('第一列必须是"姓名"列', 'error'); return;
+      }
+      // Build student name→id map
+      var nameMap = {};
+      appData.students.forEach(function(s) { nameMap[s.name] = s.id; });
+      var statusReverse = { '出勤': 'present', '缺勤': 'absent', '迟到': 'late', '请假': 'leave', 'present': 'present', 'absent': 'absent', 'late': 'late', 'leave': 'leave' };
+      var imported = 0;
+      for (var i = 1; i < data.length; i++) {
+        var row = data[i];
+        var name = String(row[0] || '').trim();
+        if (!name) continue;
+        var sid = nameMap[name];
+        if (!sid) continue; // skip unknown students
+        for (var j = 1; j < header.length; j++) {
+          var dateKey = String(header[j] || '').trim();
+          if (!dateKey) continue;
+          var statusRaw = String(row[j] || '').trim();
+          var status = statusReverse[statusRaw];
+          if (!status) continue;
+          if (!appData.attendance[dateKey]) appData.attendance[dateKey] = {};
+          appData.attendance[dateKey][sid] = status;
+          imported++;
+        }
+      }
+      saveData();
+      navigateTo('attendance');
+      toast('成功导入 ' + imported + ' 条考勤记录', 'success');
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  input.click();
+}
+
+// ============ GRADES ============
+function renderGrades() {
+  let html = `<div class="header">
+    <h1>📈 成绩管理</h1>
+    <div class="btn-group">
+      <button class="btn btn-sm btn-primary" onclick="addExam()">+ 新建考试</button>
+    </div>
+  </div>`;
+
+  const exams = appData.grades.exams;
+
+  if (exams.length === 0) {
+    html += '<div class="card"><div class="empty-state"><div class="empty-icon">📊</div><p>暂无考试记录，点击上方按钮添加</p></div></div>';
+    return html;
+  }
+
+  // Exam tabs
+  html += '<div class="tabs" id="examTabs">';
+  exams.forEach((e, idx) => {
+    html += `<button class="tab ${idx===0?'active':''}" data-exam-idx="${idx}" onclick="switchExamTab(${idx})">${escapeHtml(e.name)}</button>`;
+  });
+  html += '</div>';
+  html += '<div id="examContent"></div>';
+
+  return html;
+}
+
+function switchExamTab(idx) {
+  $$('#examTabs .tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`#examTabs .tab[data-exam-idx="${idx}"]`).classList.add('active');
+  renderExamContent(idx);
+}
+
+function renderExamContent(idx) {
+  const exam = appData.grades.exams[idx];
+  if (!exam) return;
+
+  let html = `<div class="card">
+    <div class="card-header">
+      <h3>${escapeHtml(exam.name)} (${exam.date||''})</h3>
+      <div class="btn-group">
+        <button class="btn btn-sm btn-outline" onclick="importGradesExcel(${idx})">📥 导入成绩</button>
+        <button class="btn btn-sm btn-success" onclick="exportGradesExcel(${idx})">📤 导出成绩</button>
+        <button class="btn btn-sm btn-primary" onclick="addSubject(${idx})">+ 添加科目</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteExam(${idx})">删除考试</button>
+      </div>
+    </div>
+    <div class="btn-group" style="margin-bottom:12px;">`;
+
+  // Subject tabs
+  (exam.subjects||['总分']).forEach((sub, si) => {
+    html += `<button class="btn btn-sm ${si===0?'btn-primary':'btn-outline'}" onclick="switchSubject(${idx},${si})" id="subTab-${idx}-${si}">${escapeHtml(sub)}</button>`;
+  });
+  html += `</div>`;
+
+  // Score table
+  html += `<div class="table-wrap"><table><thead><tr><th>学号</th><th>姓名</th>`;
+  (exam.subjects||[]).forEach(sub => html += `<th>${escapeHtml(sub)}</th>`);
+  html += '<th>总分</th></tr></thead><tbody>';
+
+  appData.students.forEach(s => {
+    const scores = exam.scores && exam.scores[s.id] ? exam.scores[s.id] : {};
+    let total = 0;
+    html += `<tr><td>${s.id}</td><td>${escapeHtml(s.name)}</td>`;
+    (exam.subjects||[]).forEach(sub => {
+      const sc = scores[sub] || '';
+      total += parseFloat(sc) || 0;
+      html += `<td><input type="number" style="width:70px;" class="grade-input" data-sid="${s.id}" data-subject="${escapeHtml(sub)}" data-exam="${idx}" value="${sc}"></td>`;
+    });
+    html += `<td style="font-weight:600;color:var(--primary);">${total||''}</td></tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  html += `<button class="btn btn-primary" style="margin-top:12px;" onclick="saveGrades(${idx})">💾 保存成绩</button></div>`;
+
+  // Chart
+  html += `<div class="card">
+    <div class="card-header"><h3>成绩分析</h3></div>
+    <div class="chart-container" id="gradeChart"></div>
+    <button class="btn btn-sm btn-outline" style="margin-top:8px;" onclick="exportGradeAnalysis(${idx})">📤 导出分析</button>
+  </div>`;
+
+  document.getElementById('examContent').innerHTML = html;
+
+  // Render chart after DOM update
+  setTimeout(() => renderGradeChart(idx), 100);
+}
+
+function renderGradeChart(idx) {
+  const exam = appData.grades.exams[idx];
+  if (!exam) return;
+  const container = document.getElementById('gradeChart');
+  if (!container) return;
+  if (typeof echarts === 'undefined') { container.innerHTML = '<div style="text-align:center;padding:40px;color:#999;">图表库未加载，无法显示图表</div>'; return; }
+
+  const names = appData.students.map(s => s.name);
+  const subjects = exam.subjects || [];
+
+  const series = subjects.map(sub => ({
+    name: sub,
+    type: 'bar',
+    data: appData.students.map(s => {
+      const scores = (exam.scores && exam.scores[s.id]) ? exam.scores[s.id] : {};
+      return parseFloat(scores[sub]) || 0;
+    })
+  }));
+
+  // Add average line
+  if (subjects.length > 0) {
+    series.push({
+      name: '班级平均分',
+      type: 'line',
+      data: appData.students.map(() => {
+        return appData.students.reduce((sum, s) => {
+          const scores = (exam.scores && exam.scores[s.id]) ? exam.scores[s.id] : {};
+          return sum + (parseFloat(scores[subjects[0]]) || 0);
+        }, 0) / (appData.students.length || 1);
+      }),
+      lineStyle: { type: 'dashed', color: '#E74C3C' },
+      itemStyle: { color: '#E74C3C' }
+    });
+  }
+
+  const chart = echarts.init(container);
+  chart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: [...subjects, '班级平均分'], bottom: 0 },
+    grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
+    xAxis: { type: 'category', data: names, axisLabel: { rotate: 45 } },
+    yAxis: { type: 'value', name: '分数' },
+    series: series,
+    color: ['#4A90D9','#27AE60','#F39C12','#E74C3C','#9B59B6','#1ABC9C','#E67E22']
+  });
+
+  window.addEventListener('resize', () => chart.resize());
+}
+
+function addExam() {
+  const name = prompt('请输入考试名称（如：月考一）：');
+  if (!name) return;
+  const date = prompt('请输入考试日期（如：2024-09-15）：', today());
+  appData.grades.exams.push({
+    name, date: date || today(),
+    subjects: ['语文','数学','英语','物理','化学','历史','政治','生物','地理','体育'],
+    scores: {}
+  });
+  saveData();
+  navigateTo('grades');
+  // Auto-expand first exam
+  setTimeout(() => renderExamContent(0), 100);
+  if (appData.grades.exams.length > 0) {
+    setTimeout(() => {
+      const tabs = $$('#examTabs .tab');
+      if (tabs.length > 0) tabs[tabs.length-1].click();
+    }, 50);
+  }
+}
+
+function deleteExam(idx) {
+  if (!confirm(`确定删除考试 "${appData.grades.exams[idx].name}" 吗？此操作不可恢复。`)) return;
+  appData.grades.exams.splice(idx, 1);
+  saveData();
+  navigateTo('grades');
+}
+
+function addSubject(idx) {
+  const sub = prompt('请输入科目名称：');
+  if (!sub) return;
+  const exam = appData.grades.exams[idx];
+  if (!exam.subjects) exam.subjects = [];
+  if (!exam.subjects.includes(sub)) exam.subjects.push(sub);
+  saveData();
+  renderExamContent(idx);
+}
+
+function switchSubject(examIdx, subIdx) {
+  // Highlight the subject button
+  const exam = appData.grades.exams[examIdx];
+  (exam.subjects||[]).forEach((_, si) => {
+    const btn = document.getElementById(`subTab-${examIdx}-${si}`);
+    if (btn) btn.className = `btn btn-sm ${si===subIdx?'btn-primary':'btn-outline'}`;
+  });
+}
+
+function saveGrades(idx) {
+  const exam = appData.grades.exams[idx];
+  if (!exam.scores) exam.scores = {};
+  $$(`.grade-input[data-exam="${idx}"]`).forEach(inp => {
+    const sid = parseInt(inp.dataset.sid);
+    const subject = inp.dataset.subject;
+    if (!exam.scores[sid]) exam.scores[sid] = {};
+    exam.scores[sid][subject] = parseFloat(inp.value) || 0;
+  });
+  saveData();
+  toast('成绩已保存', 'success');
+  renderGradeChart(idx);
+}
+
+function importGradesExcel(idx) {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.xlsx,.xls,.csv';
+  input.onchange = function(e) {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      const wb = XLSX.read(ev.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (data.length < 2) return;
+      const header = data[0];
+      const exam = appData.grades.exams[idx];
+      exam.subjects = header.slice(2).filter(h => h && h !== '总分');
+      exam.scores = {};
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        const sid = parseInt(row[0]);
+        if (!sid) continue;
+        exam.scores[sid] = {};
+        exam.subjects.forEach((sub, si) => {
+          exam.scores[sid][sub] = parseFloat(row[2+si]) || 0;
+        });
+      }
+      saveData();
+      renderExamContent(idx);
+      toast('成绩导入成功', 'success');
+    };
+    reader.readAsArrayBuffer(file);
+  };
+  input.click();
+}
+
+function exportGradesExcel(idx) {
+  var exam = appData.grades.exams[idx];
+  var header = ['学号','姓名'].concat(exam.subjects).concat(['总分']);
+  var rows = [header];
+  appData.students.forEach(function(s) {
+    var scores = (exam.scores && exam.scores[s.id]) ? exam.scores[s.id] : {};
+    var total = exam.subjects.reduce(function(sum, sub) { return sum + (parseFloat(scores[sub])||0); }, 0);
+    rows.push([s.id, s.name].concat(exam.subjects.map(function(sub) { return scores[sub]||0; })).concat([total]));
+  });
+  var ws = XLSX.utils.aoa_to_sheet(rows);
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '成绩');
+  var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  saveFileWithPicker(exam.name + '_成绩.xlsx', wbout, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+function exportGradeAnalysis(idx) {
+  var exam = appData.grades.exams[idx];
+  var csv = '\uFEFF科目,最高分,最低分,平均分,及格率,优秀率\n';
+  exam.subjects.forEach(function(sub) {
+    var scores = appData.students.map(function(s) {
+      var ss = (exam.scores && exam.scores[s.id]) ? exam.scores[s.id] : {};
+      return parseFloat(ss[sub]) || 0;
+    }).filter(function(s) { return s > 0; });
+    if (scores.length === 0) return;
+    var max = Math.max.apply(null, scores);
+    var min = Math.min.apply(null, scores);
+    var avg = (scores.reduce(function(a,b){return a+b;},0) / scores.length).toFixed(1);
+    var pass = (scores.filter(function(s) { return s >= 60; }).length / scores.length * 100).toFixed(1);
+    var excellent = (scores.filter(function(s) { return s >= 85; }).length / scores.length * 100).toFixed(1);
+    csv += escapeCSV(sub) + ',' + max + ',' + min + ',' + avg + ',' + pass + '%,' + excellent + '%\n';
+  });
+  saveFileWithPicker(escapeCSV(exam.name) + '_成绩分析.csv', csv, 'text/csv;charset=utf-8;');
+}
+
+// ============ CLASS MEETINGS ============
+function renderMeetings() {
+  let html = `<div class="header">
+    <h1>📝 班会内容记录</h1>
+    <button class="btn btn-sm btn-primary" onclick="addMeeting()">+ 记录班会</button>
+  </div>`;
+
+  if (appData.classMeetings.length === 0) {
+    html += '<div class="card"><div class="empty-state"><div class="empty-icon">📝</div><p>暂无班会记录</p></div></div>';
+    return html;
+  }
+
+  [...appData.classMeetings].reverse().forEach((m, idx) => {
+    const realIdx = appData.classMeetings.length - 1 - idx;
+    html += `<div class="card">
+      <div class="card-header">
+        <h3>${escapeHtml(m.date)} - ${escapeHtml(m.title)}</h3>
+        <div class="btn-group">
+          <button class="btn btn-sm btn-outline" onclick="editMeeting(${realIdx})">编辑</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteMeeting(${realIdx})">删除</button>
+        </div>
+      </div>
+      <div style="white-space:pre-wrap;line-height:1.8;">${escapeHtml(m.content||'')}</div>
+      ${(m.images||[]).length > 0 ? `<div class="meeting-images">${m.images.map((img, ii) => `<div class="meeting-image-wrap"><img src="${img}" class="img-preview"><button class="del-img" onclick="deleteMeetingImage(${realIdx},${ii})">×</button></div>`).join('')}</div>` : ''}
+    </div>`;
+  });
+
+  return html;
+}
+
+function addMeeting() {
+  const title = prompt('请输入班会主题：');
+  if (!title) return;
+  const date = prompt('请输入日期：', today());
+  if (!date) return;
+  showMeetingEditor(-1, { date, title, content: '', images: [] });
+}
+
+function editMeeting(idx) {
+  showMeetingEditor(idx, appData.classMeetings[idx]);
+}
+
+function deleteMeeting(idx) {
+  if (!confirm('确定删除该班会记录吗？')) return;
+  appData.classMeetings.splice(idx, 1);
+  saveData();
+  navigateTo('meetings');
+}
+
+function showMeetingEditor(idx, data) {
+  const isNew = idx === -1;
+  const html = `
+    <div class="modal-overlay" id="meetingModal" onclick="if(event.target===this)closeMeetingModal()">
+      <div class="modal" style="max-width:800px;">
+        <h3>${isNew?'新增':'编辑'}班会记录</h3>
+        <div class="form-group"><label>日期</label><input id="meet-date" type="date" value="${data.date}"></div>
+        <div class="form-group"><label>主题</label><input id="meet-title" value="${escapeHtml(data.title||'')}"></div>
+        <div class="form-group"><label>内容</label><textarea id="meet-content" style="min-height:200px;">${escapeHtml(data.content||'')}</textarea></div>
+        <div class="form-group"><label>图片</label><input type="file" id="meet-images" accept="image/*" multiple onchange="previewMeetingImages()">
+        <div id="meet-image-preview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+          ${(data.images||[]).map(img => `<img src="${img}" class="img-preview">`).join('')}
+        </div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveMeeting(${idx})">保存</button>
+          <button class="btn btn-ghost" onclick="closeMeetingModal()">取消</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  window._meetingImages = data.images || [];
+  window._meetingNewImages = [];
+}
+
+let _meetingImages = [];
+let _meetingNewImages = [];
+
+function previewMeetingImages() {
+  const files = document.getElementById('meet-images').files;
+  const preview = document.getElementById('meet-image-preview');
+  _meetingNewImages = [];
+  for (let i = 0; i < files.length; i++) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      _meetingNewImages.push(e.target.result);
+      const img = document.createElement('img');
+      img.src = e.target.result;
+      img.className = 'img-preview';
+      preview.appendChild(img);
+    };
+    reader.readAsDataURL(files[i]);
+  }
+}
+
+function saveMeeting(idx) {
+  const data = {
+    date: document.getElementById('meet-date').value,
+    title: document.getElementById('meet-title').value,
+    content: document.getElementById('meet-content').value,
+    images: [...window._meetingImages, ...window._meetingNewImages]
+  };
+  if (idx === -1) {
+    appData.classMeetings.push(data);
+  } else {
+    appData.classMeetings[idx] = data;
+  }
+  saveData();
+  closeMeetingModal();
+  navigateTo('meetings');
+  toast('班会记录已保存', 'success');
+}
+
+function closeMeetingModal() {
+  const m = document.getElementById('meetingModal');
+  if (m) m.remove();
+}
+
+function deleteMeetingImage(meetIdx, imgIdx) {
+  if (!confirm('确定删除该图片吗？')) return;
+  appData.classMeetings[meetIdx].images.splice(imgIdx, 1);
+  saveData();
+  navigateTo('meetings');
+}
+
+// ============ PARENT COMMUNICATION ============
+function renderParentComm() {
+  let html = `<div class="header">
+    <h1>📞 家长沟通记录</h1>
+    <button class="btn btn-sm btn-primary" onclick="addParentComm()">+ 添加记录</button>
+  </div>`;
+
+  if (appData.parentCommunications.length === 0) {
+    html += '<div class="card"><div class="empty-state"><div class="empty-icon">📞</div><p>暂无沟通记录</p></div></div>';
+    return html;
+  }
+
+  html += '<div class="card"><div class="table-wrap"><table><thead><tr><th>日期</th><th>学生</th><th>家长姓名</th><th>沟通内容</th><th>待跟进事项</th><th>操作</th></tr></thead><tbody>';
+  [...appData.parentCommunications].reverse().forEach((pc, idx) => {
+    const realIdx = appData.parentCommunications.length - 1 - idx;
+    html += `<tr>
+      <td>${escapeHtml(pc.date)}</td><td>${escapeHtml(pc.studentName)}</td>
+      <td>${escapeHtml(pc.parentName)}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(pc.content||'')}">${escapeHtml((pc.content||'').substring(0,30))}</td>
+      <td>${escapeHtml(pc.followUp||'')}</td>
+      <td>
+        <button class="btn btn-sm btn-outline" onclick="editParentComm(${realIdx})">编辑</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteParentComm(${realIdx})">删除</button>
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+function showParentCommEditor(idx, data) {
+  const isNew = idx === -1;
+  let studentOpts = appData.students.map(s => `<option value="${escapeHtml(s.name)}" ${data.studentName===s.name?'selected':''}>${escapeHtml(s.name)}</option>`).join('');
+  let parentOpts = appData.students.map(s => `<option value="${escapeHtml(s.parentName)}" ${data.parentName===s.parentName?'selected':''}>${escapeHtml(s.parentName)} (${escapeHtml(s.name)})</option>`).join('');
+
+  const html = `
+    <div class="modal-overlay" id="pcModal" onclick="if(event.target===this)closePcModal()">
+      <div class="modal">
+        <h3>${isNew?'新增':'编辑'}家长沟通记录</h3>
+        <div class="form-group"><label>日期</label><input id="pc-date" type="date" value="${data.date||today()}"></div>
+        <div class="form-group"><label>学生</label><select id="pc-student" onchange="autoFillParent()">${studentOpts}</select></div>
+        <div class="form-group"><label>家长姓名</label><input id="pc-parent" value="${escapeHtml(data.parentName||'')}"></div>
+        <div class="form-group"><label>沟通内容</label><textarea id="pc-content">${escapeHtml(data.content||'')}</textarea></div>
+        <div class="form-group"><label>待跟进事项</label><input id="pc-followup" value="${escapeHtml(data.followUp||'')}"></div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveParentComm(${idx})">保存</button>
+          <button class="btn btn-ghost" onclick="closePcModal()">取消</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function autoFillParent() {
+  const sel = document.getElementById('pc-student');
+  if (!sel) return;
+  const student = appData.students.find(s => s.name === sel.value);
+  if (student) document.getElementById('pc-parent').value = student.parentName || '';
+}
+
+function addParentComm() { showParentCommEditor(-1, {}); }
+function editParentComm(idx) { showParentCommEditor(idx, appData.parentCommunications[idx]); }
+function deleteParentComm(idx) {
+  if (!confirm('确定删除该沟通记录吗？')) return;
+  appData.parentCommunications.splice(idx, 1);
+  saveData(); navigateTo('parent-comm');
+}
+
+function saveParentComm(idx) {
+  const data = {
+    date: document.getElementById('pc-date').value,
+    studentName: document.getElementById('pc-student').value,
+    parentName: document.getElementById('pc-parent').value,
+    content: document.getElementById('pc-content').value,
+    followUp: document.getElementById('pc-followup').value
+  };
+  if (idx === -1) appData.parentCommunications.push(data);
+  else appData.parentCommunications[idx] = data;
+  saveData(); closePcModal();
+  navigateTo('parent-comm'); toast('记录已保存', 'success');
+}
+function closePcModal() { const m = document.getElementById('pcModal'); if(m) m.remove(); }
+
+// ============ BEHAVIOR RECORDS ============
+function renderBehavior() {
+  let html = `<div class="header">
+    <h1>⭐ 学生行为记录</h1>
+    <button class="btn btn-sm btn-primary" onclick="addBehavior()">+ 添加记录</button>
+  </div>`;
+
+  if (appData.behaviorRecords.length === 0) {
+    html += '<div class="card"><div class="empty-state"><div class="empty-icon">⭐</div><p>暂无行为记录</p></div></div>';
+    return html;
+  }
+
+  html += '<div class="card"><div class="table-wrap"><table><thead><tr><th>日期</th><th>学生</th><th>类型</th><th>描述</th><th>处理方式</th><th>操作</th></tr></thead><tbody>';
+  [...appData.behaviorRecords].reverse().forEach((br, idx) => {
+    const realIdx = appData.behaviorRecords.length - 1 - idx;
+    const typeTag = br.type === '奖励' ? '<span class="tag tag-green">奖励</span>' : '<span class="tag tag-red">惩罚</span>';
+    html += `<tr>
+      <td>${escapeHtml(br.date)}</td><td>${escapeHtml(br.studentName)}</td>
+      <td>${typeTag}</td><td>${escapeHtml(br.description||'')}</td>
+      <td>${escapeHtml(br.action||'')}</td>
+      <td>
+        <button class="btn btn-sm btn-outline" onclick="editBehavior(${realIdx})">编辑</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteBehavior(${realIdx})">删除</button>
+      </td></tr>`;
+  });
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+function showBehaviorEditor(idx, data) {
+  const isNew = idx === -1;
+  let studentOpts = appData.students.map(s => `<option value="${escapeHtml(s.name)}" ${data.studentName===s.name?'selected':''}>${escapeHtml(s.name)}</option>`).join('');
+  const html = `
+    <div class="modal-overlay" id="brModal" onclick="if(event.target===this)closeBrModal()">
+      <div class="modal">
+        <h3>${isNew?'新增':'编辑'}行为记录</h3>
+        <div class="form-group"><label>日期</label><input id="br-date" type="date" value="${data.date||today()}"></div>
+        <div class="form-group"><label>学生</label><select id="br-student">${studentOpts}</select></div>
+        <div class="form-group"><label>类型</label><select id="br-type"><option value="奖励" ${data.type==='奖励'?'selected':''}>奖励</option><option value="惩罚" ${data.type==='惩罚'?'selected':''}>惩罚</option></select></div>
+        <div class="form-group"><label>描述</label><textarea id="br-desc">${escapeHtml(data.description||'')}</textarea></div>
+        <div class="form-group"><label>处理方式</label><input id="br-action" value="${escapeHtml(data.action||'')}"></div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveBehavior(${idx})">保存</button>
+          <button class="btn btn-ghost" onclick="closeBrModal()">取消</button>
+        </div>
+      </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+function addBehavior() { showBehaviorEditor(-1, {}); }
+function editBehavior(idx) { showBehaviorEditor(idx, appData.behaviorRecords[idx]); }
+function deleteBehavior(idx) {
+  if (!confirm('确定删除吗？')) return;
+  appData.behaviorRecords.splice(idx, 1); saveData(); navigateTo('behavior');
+}
+function saveBehavior(idx) {
+  const data = {
+    date: document.getElementById('br-date').value,
+    studentName: document.getElementById('br-student').value,
+    type: document.getElementById('br-type').value,
+    description: document.getElementById('br-desc').value,
+    action: document.getElementById('br-action').value
+  };
+  if (idx === -1) appData.behaviorRecords.push(data);
+  else appData.behaviorRecords[idx] = data;
+  saveData(); closeBrModal();
+  navigateTo('behavior'); toast('记录已保存', 'success');
+}
+function closeBrModal() { const m = document.getElementById('brModal'); if(m) m.remove(); }
+
+// ============ CLASS FEES ============
+function renderFees() {
+  const totalIncome = appData.classFees.records.filter(r => r.type === '收入').reduce((s, r) => s + r.amount, 0);
+  const totalExpense = appData.classFees.records.filter(r => r.type === '支出').reduce((s, r) => s + r.amount, 0);
+  let html = `<div class="header">
+    <h1>💰 班费管理</h1>
+    <div class="btn-group">
+      <button class="btn btn-sm btn-primary" onclick="addFeeRecord()">+ 添加记录</button>
+      <button class="btn btn-sm btn-success" onclick="exportAllFees()">📤 一键导出Excel</button>
+    </div>
+  </div>
+  <div class="stats-grid">
+    <div class="stat-card"><div class="num ${appData.classFees.balance>=0?'positive':'negative'} fee-balance">¥${appData.classFees.balance.toFixed(2)}</div><div class="label">当前余额</div></div>
+    <div class="stat-card accent"><div class="num">¥${totalIncome.toFixed(2)}</div><div class="label">总收入</div></div>
+    <div class="stat-card warn"><div class="num">¥${totalExpense.toFixed(2)}</div><div class="label">总支出</div></div>
+    <div class="stat-card"><div class="num">${appData.classFees.records.length}</div><div class="label">记录总数</div></div>
+  </div>`;
+
+  // Records table
+  html += '<div class="card"><div class="card-header"><h3>收支明细</h3></div>';
+  if (appData.classFees.records.length === 0) {
+    html += '<div class="empty-state"><p>暂无班费记录</p></div>';
+  } else {
+    html += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>类型</th><th>金额</th><th>说明</th><th>余额</th><th>操作</th></tr></thead><tbody>';
+    [...appData.classFees.records].reverse().forEach((fr, idx) => {
+      const realIdx = appData.classFees.records.length - 1 - idx;
+      const typeTag = fr.type === '收入' ? '<span class="tag tag-green">收入</span>' : '<span class="tag tag-red">支出</span>';
+      html += `<tr>
+        <td>${escapeHtml(fr.date)}</td><td>${typeTag}</td>
+        <td style="font-weight:600;color:${fr.type==='收入'?'var(--success)':'var(--danger)'};">¥${fr.amount.toFixed(2)}</td>
+        <td>${escapeHtml(fr.description||'')}</td><td>¥${fr.balance.toFixed(2)}</td>
+        <td><button class="btn btn-sm btn-danger" onclick="deleteFeeRecord(${realIdx})">删除</button></td></tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
+
+  // Invoice management
+  html += `<div class="card">
+    <div class="card-header">
+      <h3>🧾 发票管理</h3>
+      <button class="btn btn-sm btn-outline" onclick="addInvoice()">+ 上传发票</button>
+    </div>`;
+  if (!appData.classFees.invoices || appData.classFees.invoices.length === 0) {
+    html += '<div class="empty-state"><p>暂无发票记录</p></div>';
+  } else {
+    html += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>发票号码</th><th>金额</th><th>用途</th><th>发票预览</th><th>操作</th></tr></thead><tbody>';
+    [...appData.classFees.invoices].reverse().forEach((inv, idx) => {
+      const realIdx = appData.classFees.invoices.length - 1 - idx;
+      html += `<tr>
+        <td>${escapeHtml(inv.date)}</td><td>${escapeHtml(inv.invoiceNo||'')}</td>
+        <td style="font-weight:600;">¥${(inv.amount||0).toFixed(2)}</td>
+        <td>${escapeHtml(inv.purpose||'')}</td>
+        <td>${inv.image ? `<img src="${inv.image}" class="img-preview" style="max-width:80px;max-height:60px;cursor:pointer;" onclick="viewInvoiceImage('${realIdx}')">` : '无'}</td>
+        <td><button class="btn btn-sm btn-danger" onclick="deleteInvoice(${realIdx})">删除</button></td></tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
+
+  return html;
+}
+
+function addFeeRecord() { showFeeEditor(); }
+
+function showFeeEditor() {
+  const html = `
+    <div class="modal-overlay" id="feeModal" onclick="if(event.target===this)closeFeeModal()">
+      <div class="modal">
+        <h3>新增班费记录</h3>
+        <div class="form-group"><label>日期</label><input id="fee-date" type="date" value="${today()}"></div>
+        <div class="form-group"><label>类型</label><select id="fee-type"><option value="收入">收入</option><option value="支出">支出</option></select></div>
+        <div class="form-group"><label>金额</label><input id="fee-amount" type="number" step="0.01" min="0" placeholder="0.00"></div>
+        <div class="form-group"><label>说明</label><input id="fee-desc" placeholder="如：购买班服、收取班会费"></div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveFeeRecord()">保存</button>
+          <button class="btn btn-ghost" onclick="closeFeeModal()">取消</button>
+        </div>
+      </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function deleteFeeRecord(idx) {
+  if (!confirm('确定删除该记录吗？这将影响余额计算。')) return;
+  const record = appData.classFees.records[idx];
+  const diff = record.type === '收入' ? -record.amount : record.amount;
+  appData.classFees.balance += diff;
+  for (let i = idx + 1; i < appData.classFees.records.length; i++) {
+    appData.classFees.records[i].balance += diff;
+  }
+  appData.classFees.records.splice(idx, 1);
+  saveData(); navigateTo('fees');
+}
+
+function saveFeeRecord() {
+  const amount = parseFloat(document.getElementById('fee-amount').value);
+  if (!amount || amount <= 0) { toast('请输入有效金额', 'error'); return; }
+  const type = document.getElementById('fee-type').value;
+  const change = type === '收入' ? amount : -amount;
+  const newBalance = appData.classFees.balance + change;
+  appData.classFees.records.push({
+    date: document.getElementById('fee-date').value,
+    type, amount,
+    description: document.getElementById('fee-desc').value,
+    balance: newBalance
+  });
+  appData.classFees.balance = newBalance;
+  saveData(); closeFeeModal();
+  navigateTo('fees'); toast('记录已保存', 'success');
+}
+
+function closeFeeModal() { const m = document.getElementById('feeModal'); if(m) m.remove(); }
+
+// ============ INVOICE MANAGEMENT ============
+function addInvoice() {
+  const html = `
+    <div class="modal-overlay" id="invoiceModal" onclick="if(event.target===this)closeInvoiceModal()">
+      <div class="modal">
+        <h3>上传发票</h3>
+        <div class="form-group"><label>日期</label><input id="inv-date" type="date" value="${today()}"></div>
+        <div class="form-group"><label>发票号码</label><input id="inv-no" placeholder="如：12345678"></div>
+        <div class="form-group"><label>金额</label><input id="inv-amount" type="number" step="0.01" placeholder="0.00"></div>
+        <div class="form-group"><label>用途</label><input id="inv-purpose" placeholder="如：购买班级文具"></div>
+        <div class="form-group"><label>发票图片</label><input type="file" id="inv-image" accept="image/*" onchange="previewInvoiceImage()">
+        <div id="inv-preview" style="margin-top:8px;"></div></div>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="saveInvoice()">保存发票</button>
+          <button class="btn btn-ghost" onclick="closeInvoiceModal()">取消</button>
+        </div>
+      </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  window._invoiceImage = null;
+}
+
+function previewInvoiceImage() {
+  const file = document.getElementById('inv-image').files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    window._invoiceImage = e.target.result;
+    document.getElementById('inv-preview').innerHTML = `<img src="${e.target.result}" class="img-preview">`;
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveInvoice() {
+  const inv = {
+    date: document.getElementById('inv-date').value,
+    invoiceNo: document.getElementById('inv-no').value,
+    amount: parseFloat(document.getElementById('inv-amount').value) || 0,
+    purpose: document.getElementById('inv-purpose').value,
+    image: window._invoiceImage || null
+  };
+  if (!appData.classFees.invoices) appData.classFees.invoices = [];
+  appData.classFees.invoices.push(inv);
+  saveData(); closeInvoiceModal();
+  navigateTo('fees'); toast('发票已保存', 'success');
+}
+
+function closeInvoiceModal() { const m = document.getElementById('invoiceModal'); if(m) m.remove(); }
+
+function viewInvoiceImage(idx) {
+  const inv = appData.classFees.invoices[idx];
+  if (!inv || !inv.image) return;
+  const html = `<div class="modal-overlay" id="imgViewModal" onclick="closeImageView()">
+    <div class="modal" style="max-width:90vw;text-align:center;">
+      <img src="${inv.image}" style="max-width:100%;max-height:75vh;border-radius:8px;">
+      <p style="margin-top:8px;color:var(--text-light);">发票号码: ${escapeHtml(inv.invoiceNo)} | 金额: ¥${inv.amount.toFixed(2)}</p>
+    </div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeImageView() { const m = document.getElementById('imgViewModal'); if(m) m.remove(); }
+
+function deleteInvoice(idx) {
+  if (!confirm('确定删除该发票记录吗？')) return;
+  appData.classFees.invoices.splice(idx, 1);
+  saveData(); navigateTo('fees');
+}
+
+function exportAllFees() {
+  // Export both records and invoices
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: 收支明细
+  const recordsData = appData.classFees.records.map(r => ({
+    '日期': r.date, '类型': r.type, '金额': r.amount,
+    '说明': r.description||'', '余额': r.balance
+  }));
+  const ws1 = XLSX.utils.json_to_sheet(recordsData);
+  XLSX.utils.book_append_sheet(wb, ws1, '收支明细');
+
+  // Sheet 2: 发票记录
+  const invoicesData = (appData.classFees.invoices||[]).map(inv => ({
+    '日期': inv.date, '发票号码': inv.invoiceNo,
+    '金额': inv.amount, '用途': inv.purpose||''
+  }));
+  const ws2 = XLSX.utils.json_to_sheet(invoicesData);
+  XLSX.utils.book_append_sheet(wb, ws2, '发票记录');
+
+  // Sheet 3: 汇总
+  const totalIncome = appData.classFees.records.filter(r => r.type === '收入').reduce((s,r) => s + r.amount, 0);
+  const totalExpense = appData.classFees.records.filter(r => r.type === '支出').reduce((s,r) => s + r.amount, 0);
+  const summary = [
+    {'项目': '总收入', '金额': totalIncome},
+    {'项目': '总支出', '金额': totalExpense},
+    {'项目': '当前余额', '金额': appData.classFees.balance},
+    {'项目': '记录总数', '金额': appData.classFees.records.length},
+    {'项目': '发票数量', '金额': (appData.classFees.invoices||[]).length}
+  ];
+  const ws3 = XLSX.utils.json_to_sheet(summary);
+  XLSX.utils.book_append_sheet(wb, ws3, '汇总');
+
+  var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  saveFileWithPicker('班费管理_' + today() + '.xlsx', wbout, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+// ============ PERSONAL SCHEDULE ============
+function renderMySchedule() {
+  const ps = appData.personalSchedule;
+  const days = ['星期一','星期二','星期三','星期四','星期五'];
+  let html = `<div class="header">
+    <h1>🗓️ 个人教学课表</h1>
+    <button class="btn btn-outline btn-sm" onclick="exportMySchedule()">📤 导出CSV</button>
+  </div>
+  <div class="card"><div class="table-wrap"><table class="schedule-table"><thead><tr><th>时段</th><th>时间</th>`;
+  days.forEach(d => html += `<th>${d}</th>`);
+  html += '</tr></thead><tbody>';
+  ps.periods.slice(0, 10).forEach((p, pi) => {
+    const timeVal = (ps.periodTimes && ps.periodTimes[pi]) || '';
+    html += `<tr><td style="font-weight:600;">${escapeHtml(p)}</td><td><input value="${escapeHtml(timeVal)}" data-time-idx="${pi}" class="ps-time-input" style="width:100px;text-align:center;" placeholder="如 8:00-8:45"></td>`;
+    weekKeys.slice(0,5).forEach(wk => {
+      const val = (ps[wk] && ps[wk][pi]) || '';
+      html += `<td><input value="${escapeHtml(val)}" data-week="${wk}" data-period="${pi}" class="ps-input" placeholder=""></td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  html += `<button class="btn btn-primary" style="margin-top:12px;" onclick="savePersonalSchedule()">💾 保存课表</button></div>`;
+
+  // Sync teaching progress
+  html += `<div class="card">
+    <div class="card-header"><h3>教学进度同步状态</h3></div>`;
+  appData.teachingClasses.forEach(tc => {
+    const lastProgress = tc.progress && tc.progress.length > 0 ? tc.progress[tc.progress.length-1] : null;
+    html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
+      <strong>${escapeHtml(tc.name)} - ${escapeHtml(tc.subject)}</strong>: ${lastProgress ? `最近进度: ${escapeHtml(lastProgress.date)} ${escapeHtml(lastProgress.content)}` : '暂无进度记录'}
+    </div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function savePersonalSchedule() {
+  var maxIdx = (appData.personalSchedule.periods && appData.personalSchedule.periods.length) || 10;
+  $$('.ps-input').forEach(inp => {
+    const wk = inp.dataset.week, pi = parseInt(inp.dataset.period);
+    if (pi >= maxIdx) return; // Guard against array inflation
+    if (!appData.personalSchedule[wk]) appData.personalSchedule[wk] = [];
+    appData.personalSchedule[wk][pi] = inp.value;
+  });
+  $$('.ps-time-input').forEach(inp => {
+    const pi = parseInt(inp.dataset.timeIdx);
+    if (pi >= maxIdx) return; // Guard against array inflation
+    if (!appData.personalSchedule.periodTimes) appData.personalSchedule.periodTimes = [];
+    appData.personalSchedule.periodTimes[pi] = inp.value;
+  });
+  trimSchedule(appData.personalSchedule);
+  saveData(); toast('课表已保存', 'success');
+}
+
+function exportMySchedule() {
+  var ps = appData.personalSchedule;
+  var days = ['星期一','星期二','星期三','星期四','星期五'];
+  var csv = '\uFEFF时段,' + days.join(',') + '\n';
+  ps.periods.slice(0, 10).forEach(function(p, pi) {
+    var row = [escapeCSV(p)];
+    weekKeys.slice(0,5).forEach(function(wk) { row.push(escapeCSV((ps[wk]&&ps[wk][pi])||'')); });
+    csv += row.join(',') + '\n';
+  });
+  saveFileWithPicker('个人教学课表.csv', csv, 'text/csv;charset=utf-8;');
+}
+
+// ============ TEACHING CLASSES ============
+function renderTeachingClasses() {
+  let html = `<div class="header">
+    <h1>📚 教学班级管理</h1>
+    <button class="btn btn-sm btn-primary" onclick="addTeachingClass()">+ 添加教学班级</button>
+  </div>`;
+
+  if (appData.teachingClasses.length === 0) {
+    html += '<div class="card"><div class="empty-state"><div class="empty-icon">📚</div><p>暂无教学班级</p></div></div>';
+    return html;
+  }
+
+  appData.teachingClasses.forEach((tc, idx) => {
+    html += `<div class="card">
+      <div class="card-header">
+        <h3>${escapeHtml(tc.name)} - ${escapeHtml(tc.subject)}</h3>
+        <div class="btn-group">
+          <button class="btn btn-sm btn-outline" onclick="addTeachingProgress(${idx})">+ 教学进度</button>
+          <button class="btn btn-sm btn-outline" onclick="addTeachingGrade(${idx})">+ 成绩记录</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteTeachingClass(${idx})">删除</button>
+        </div>
+      </div>`;
+
+    // Progress records
+    html += '<h4 style="margin:8px 0;font-size:13px;">📖 教学进度</h4>';
+    if (!tc.progress || tc.progress.length === 0) {
+      html += '<p style="color:var(--text-light);font-size:12px;">暂无进度记录</p>';
+    } else {
+      [...tc.progress].reverse().forEach(p => {
+        html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <span class="tag tag-blue">${escapeHtml(p.date)}</span> ${escapeHtml(p.content)}
+        </div>`;
+      });
+    }
+
+    // Grades
+    html += '<h4 style="margin:12px 0 8px;font-size:13px;">📊 成绩记录</h4>';
+    if (!tc.grades || tc.grades.length === 0) {
+      html += '<p style="color:var(--text-light);font-size:12px;">暂无成绩记录</p>';
+    } else {
+      html += '<div class="table-wrap"><table><thead><tr><th>考试名称</th><th>日期</th><th>平均分</th><th>最高分</th><th>最低分</th><th>及格率</th></tr></thead><tbody>';
+      tc.grades.forEach(g => {
+        html += `<tr>
+          <td>${escapeHtml(g.name)}</td><td>${escapeHtml(g.date)}</td>
+          <td>${g.avg}</td><td>${g.max}</td><td>${g.min}</td><td>${g.passRate}%</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+  });
+
+  return html;
+}
+
+function addTeachingClass() {
+  const name = prompt('请输入班级名称（如：七年级(2)班）：');
+  if (!name) return;
+  const subject = prompt('请输入任教学科：');
+  if (!subject) return;
+  appData.teachingClasses.push({ id: Date.now(), name, subject, grades: [], progress: [] });
+  saveData(); navigateTo('teaching-classes'); toast('教学班级已添加', 'success');
+}
+
+function deleteTeachingClass(idx) {
+  if (!confirm('确定删除该教学班级吗？')) return;
+  appData.teachingClasses.splice(idx, 1);
+  saveData(); navigateTo('teaching-classes');
+}
+
+function addTeachingProgress(idx) {
+  const content = prompt('请输入教学进度内容（如：已完成第二章第三节）：');
+  if (!content) return;
+  const date = prompt('请输入日期：', today());
+  if (!date) return;
+  if (!appData.teachingClasses[idx].progress) appData.teachingClasses[idx].progress = [];
+  appData.teachingClasses[idx].progress.push({ date, content });
+
+  // Sync to personal schedule - mark in the course table
+  const tc = appData.teachingClasses[idx];
+  const weekDay = new Date(date).getDay();
+  if (weekDay >= 1 && weekDay <= 5) {
+    const wk = weekKeys[weekDay-1];
+    const periods = appData.personalSchedule.periods;
+    // Find matching subject in schedule and append progress info
+    for (let pi = 0; pi < periods.length; pi++) {
+      const entry = appData.personalSchedule[wk] && appData.personalSchedule[wk][pi];
+      if (entry && entry.includes(tc.name)) {
+        if (!appData.personalSchedule[wk]) appData.personalSchedule[wk] = [];
+        appData.personalSchedule[wk][pi] = entry + ` [进度:${content}]`;
+        break;
+      }
+    }
+  }
+
+  saveData(); navigateTo('teaching-classes'); toast('进度已记录并同步到课表', 'success');
+}
+
+function addTeachingGrade(idx) {
+  const name = prompt('请输入考试名称：');
+  if (!name) return;
+  const date = prompt('请输入日期：', today());
+  const avg = prompt('请输入平均分：');
+  const max = prompt('请输入最高分：');
+  const min = prompt('请输入最低分：');
+  const passRate = prompt('请输入及格率(%)：');
+
+  if (!appData.teachingClasses[idx].grades) appData.teachingClasses[idx].grades = [];
+  appData.teachingClasses[idx].grades.push({
+    name, date: date || today(),
+    avg: parseFloat(avg) || 0,
+    max: parseFloat(max) || 0,
+    min: parseFloat(min) || 0,
+    passRate: parseFloat(passRate) || 0
+  });
+  saveData(); navigateTo('teaching-classes'); toast('成绩已记录', 'success');
+}
+
+// ============ NOTIFICATIONS ============
+function renderNotifications() {
+  let html = `<div class="header">
+    <h1>🔔 通知公告栏</h1>
+    <button class="btn btn-sm btn-primary" onclick="addNotification()">+ 发布通知</button>
+  </div>`;
+
+  if (appData.notifications.length === 0) {
+    html += '<div class="card"><div class="empty-state"><div class="empty-icon">🔔</div><p>暂无通知</p></div></div>';
+    return html;
+  }
+
+  [...appData.notifications].reverse().forEach((n, idx) => {
+    const realIdx = appData.notifications.length - 1 - idx;
+    html += `<div class="card" style="border-left: 4px solid var(--primary);">
+      <div class="card-header">
+        <h3>📌 ${escapeHtml(n.title)}</h3>
+        <div class="btn-group">
+          <span style="font-size:12px;color:var(--text-light);">${escapeHtml(n.date)}</span>
+          <button class="btn btn-sm btn-danger" onclick="deleteNotification(${realIdx})">删除</button>
+        </div>
+      </div>
+      <div style="white-space:pre-wrap;line-height:1.8;">${escapeHtml(n.content||'')}</div>
+    </div>`;
+  });
+
+  return html;
+}
+
+function addNotification() {
+  const title = prompt('请输入通知标题：');
+  if (!title) return;
+  const content = prompt('请输入通知内容：');
+  if (content === null) return;
+  appData.notifications.push({ date: today(), title, content: content || '' });
+  saveData(); navigateTo('notifications'); toast('通知已发布', 'success');
+}
+
+function deleteNotification(idx) {
+  if (!confirm('确定删除该通知吗？')) return;
+  appData.notifications.splice(idx, 1);
+  saveData(); navigateTo('notifications');
+}
+
+// ============ HELPERS ============
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escapeCSV(val) {
+  val = String(val == null ? '' : val);
+  if (val.includes(',') || val.includes('"') || val.includes('\n') || val.includes('\r')) {
+    return '"' + val.replace(/"/g, '""') + '"';
+  }
+  return val;
+}
+
+function downloadFile(filename, content) {
+  // Legacy fallback: auto-download to browser default folder
+  var blob;
+  if (content instanceof Blob) {
+    blob = content;
+  } else if (content instanceof ArrayBuffer || content instanceof Uint8Array) {
+    blob = new Blob([content], { type: 'application/octet-stream' });
+  } else {
+    blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  }
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function saveFileWithPicker(filename, content, mimeType) {
+  // Try File System Access API (Edge/Chrome — "Save As" dialog)
+  if (window.showSaveFilePicker) {
+    try {
+      var blob;
+      if (content instanceof Blob) {
+        blob = content;
+      } else if (content instanceof ArrayBuffer || content instanceof Uint8Array) {
+        blob = new Blob([content], { type: mimeType || 'application/octet-stream' });
+      } else {
+        blob = new Blob([content], { type: mimeType || 'text/csv;charset=utf-8;' });
+      }
+      var ext = filename.split('.').pop().toLowerCase();
+      var types = [];
+      if (ext === 'csv') types = [{ description: 'CSV 文件', accept: { 'text/csv': ['.csv'] } }];
+      else if (ext === 'xlsx') types = [{ description: 'Excel 文件', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }];
+      var handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: types.length > 0 ? types : undefined
+      });
+      var writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      toast('导出成功: ' + filename, 'success');
+      return;
+    } catch(e) {
+      if (e.name === 'AbortError') return; // User cancelled
+      console.warn('Save picker failed, fallback to download:', e);
+    }
+  }
+  // Fallback
+  downloadFile(filename, content);
+  toast('已下载: ' + filename, 'success');
+}
+
+// ============ PAGE EVENT BINDING ============
+function bindPageEvents(page) {
+  switch(page) {
+    case 'dashboard':
+      document.querySelectorAll('[data-plan-action="toggle"]').forEach(el => {
+        el.onclick = () => toggleWorkPlan(el.dataset.planDate, parseInt(el.dataset.planIdx));
+      });
+      document.querySelectorAll('[data-plan-action="delete"]').forEach(el => {
+        el.onclick = () => deleteWorkPlan(el.dataset.planDate, parseInt(el.dataset.planIdx));
+      });
+      break;
+    case 'grades':
+      // Initial exam content render
+      if (appData.grades.exams.length > 0) {
+        renderExamContent(0);
+      }
+      break;
+  }
+}
+
+// ============ INIT ============
+var _initCalled = false;
+
+async function init() {
+  // Prevent double initialization
+  if (_initCalled) { console.log('[INIT] Already initialized, skipping'); return; }
+  _initCalled = true;
+  // 1. Load local data FIRST (from IndexedDB) so appData has offline changes
+  await loadLocalData();
+  // 2. Now connect to server (connect event will push queue then pull from server)
+  setupNavigation();
+  updateOnlineStatus();
+  connectSocket();
+  // 3. If socket not available, try REST fallback
+  if (typeof io === 'undefined') {
+    var loaded = await loadFromServer(true);
+    if (!loaded) useApi = false;
+  }
+  // 4. Render
+  if (currentPage) navigateTo(currentPage);
+  else navigateTo('dashboard');
+}
+
+async function loadLocalData() {
+  // 1. Try IndexedDB (offline-first)
+  try {
+    var cached = await idbGet('data', 'appData');
+    if (cached && cached.value) {
+      appData = deepMerge(getDefaultData(), cached.value);
+      // Auto-repair any inflated schedule arrays
+      trimSchedule(appData.classSchedule);
+      trimSchedule(appData.personalSchedule);
+      console.log('[DATA] Loaded from IndexedDB');
+      return;
+    }
+  } catch(e) { console.warn('[DATA] IndexedDB load failed:', e); }
+
+  // 2. Fallback to localStorage
+  try {
+    var saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      appData = deepMerge(getDefaultData(), JSON.parse(saved));
+      trimSchedule(appData.classSchedule);
+      trimSchedule(appData.personalSchedule);
+      console.log('[DATA] Loaded from localStorage fallback');
+    }
+  } catch(e) {}
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  // Add padding for sync bar on desktop
+  var main = document.getElementById('mainContent');
+  if (main) main.classList.add('padded-top');
+  // Bind login button (use addEventListener for pywebview compatibility)
+  var loginBtn = document.getElementById('loginBtn');
+  if (loginBtn) {
+    loginBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      doLogin();
+    });
+  }
+  // Bind Enter key on login
+  var loginUser = document.getElementById('loginUser');
+  var loginPass = document.getElementById('loginPass');
+  if (loginUser) {
+    loginUser.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        if (loginPass) loginPass.focus();
+      }
+    });
+  }
+  if (loginPass) {
+    loginPass.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') doLogin();
+    });
+  }
+  // Show install help on mobile login page
+  updateInstallUI();
+  // Auto-fill remembered username (IndexedDB + localStorage)
+  fillRememberedUser();
+  // Check if already logged in
+  var isLoggedIn = false;
+  try {
+    isLoggedIn = localStorage.getItem('teacher_workbench_loggedin') === '1';
+  } catch(e) {
+    isLoggedIn = window._teacher_loggedin === true;
+  }
+  if (isLoggedIn) {
+    document.getElementById('loginWrapper').style.display = 'none';
+    document.getElementById('appContainer').style.display = '';
+    document.body.style.display = 'flex';
+    init();
+    updateInstallUI();
+  } else {
+    document.body.style.display = '';
+  }
+});
+</script>
+</body>
+</html>
