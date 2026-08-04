@@ -781,6 +781,8 @@ let useApi = true; // Will be set false if server unavailable
 let _lastSyncTime = null;
 let _hasUnsavedChanges = false;
 let _usingCloud = false; // true when connected to cloud server
+let _autoSaveTimer = null;
+const AUTO_SAVE_DELAY = 2000; // 2 seconds debounce
 
 // ============ SOCKET.IO ============
 function connectSocket() {
@@ -1323,6 +1325,15 @@ function updateOnlineStatus() {
   }
 }
 
+// Warn before closing if there are unsaved changes
+window.addEventListener('beforeunload', function(e) {
+  if (_hasUnsavedChanges) {
+    e.preventDefault();
+    e.returnValue = '您有未保存的更改，确定离开吗？';
+    return e.returnValue;
+  }
+});
+
 window.addEventListener('online', function() {
   console.log('[APP] Online - syncing...');
   updateOnlineStatus();
@@ -1442,11 +1453,53 @@ async function saveDataLocal(skipFlag) {
         console.log('[SYNC] Realtime push: workPlan via Socket.IO');
       } catch(e) { console.warn('[SYNC] Socket emit failed:', e); }
     }
+    // Trigger auto-save after local changes
+    triggerAutoSave();
   } catch(e) { console.warn('Failed to save local:', e); }
 }
 
 // Alias: keep old function name for compatibility with all data-modification code
 var saveData = saveDataLocal;
+
+// Auto-save: triggers a debounced server save after local changes
+function triggerAutoSave() {
+  if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(function() {
+    if (_hasUnsavedChanges && isOnline) {
+      console.log('[AUTO-SAVE] Auto-saving...');
+      doSilentSave();
+    }
+  }, AUTO_SAVE_DELAY);
+}
+
+// Silent save: same as doManualSave but without toast notifications or button animations
+async function doSilentSave() {
+  if (!_hasUnsavedChanges) return;
+  try {
+    await idbPut('data', { key: 'appData', value: appData });
+  } catch(e) {}
+  
+  if (useApi && isOnline) {
+    try {
+      var resp = await fetch(API_BASE + '/api/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(appData)
+      });
+      if (resp.ok) {
+        _lastSyncTime = new Date();
+        _hasUnsavedChanges = false;
+        updateSyncTime();
+        updateSaveButton();
+        console.log('[AUTO-SAVE] Saved successfully');
+        // Push workPlan via Socket.IO
+        if (socketConnected) {
+          try { socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan }); } catch(e) {}
+        }
+      }
+    } catch(e) { console.warn('[AUTO-SAVE] Server unreachable, will retry'); }
+  }
+}
 
 // doManualSave — explicit save: persist locally + push full data to server
 async function doManualSave() {
@@ -1821,6 +1874,13 @@ function closeMobileNav() {
 }
 
 function navigateTo(page) {
+  // Auto-save before switching pages if there are unsaved changes
+  if (_hasUnsavedChanges && currentPage !== page) {
+    doSilentSave();
+  }
+  // Cancel any pending auto-save since we're navigating away
+  if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
+  
   currentPage = page;
   let html = '';
   switch(page) {
@@ -2143,7 +2203,7 @@ function uploadPlanPhoto(date, itemId) {
         if (loaded === total) {
           saveData();
           navigateTo('weekly-plan');
-          showToast('照片上传成功', 'success');
+          toast('照片上传成功', 'success');
         }
       };
       reader.readAsDataURL(file);
