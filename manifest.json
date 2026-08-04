@@ -1,0 +1,28 @@
+{
+  "name": "班主任工作台",
+  "short_name": "班主任工作台",
+  "description": "初中班主任班级管理与教学管理一体化工具",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5F7FA",
+  "theme_color": "#4A90D9",
+  "orientation": "any",
+  "scope": "/",
+  "id": "/",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "lang": "zh-CN",
+  "categories": ["education", "productivity"]
+}
