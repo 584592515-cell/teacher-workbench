@@ -240,7 +240,7 @@ table input:focus, table select:focus {
   background: var(--primary); flex-shrink: 0; margin-top: 6px;
 }
 /* Weekly Plan Table */
-.weekly-plan-table { min-width: 1000px; }
+.weekly-plan-table { table-layout: fixed; width: 100%; min-width: 1000px; border-collapse: collapse; }
 .weekly-plan-table th { position: sticky; top: 0; z-index: 1; }
 .weekly-plan-table td { border-right: 1px solid var(--border); }
 .weekly-plan-table td:last-child { border-right: none; }
@@ -1419,13 +1419,20 @@ async function processSyncQueue() {
 }
 
 // ============ DATA LAYER ============
-// saveDataLocal — save to IndexedDB only (for local crash-recovery, does NOT sync to server)
-// Server push happens ONLY when user clicks "保存" button
+// saveDataLocal — save to IndexedDB + push workPlan changes via Socket.IO in real-time
 async function saveDataLocal(skipFlag) {
   try {
     await idbPut('data', { key: 'appData', value: appData });
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
     if (!skipFlag) { _hasUnsavedChanges = true; updateSaveButton(); }
+
+    // Real-time sync: push workPlan changes to other clients via Socket.IO
+    if (socketConnected) {
+      try {
+        socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan });
+        console.log('[SYNC] Realtime push: workPlan via Socket.IO');
+      } catch(e) { console.warn('[SYNC] Socket emit failed:', e); }
+    }
   } catch(e) { console.warn('Failed to save local:', e); }
 }
 
@@ -1466,6 +1473,14 @@ async function doManualSave() {
     updateSyncTime();
     updateSaveButton();
     toast('✅ 保存成功 · 已同步到服务器', 'success');
+
+    // Also emit via Socket.IO so other connected clients get the update in real-time
+    if (socketConnected) {
+      try {
+        socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan });
+        console.log('[SYNC] doManualSave: pushed workPlan via Socket.IO');
+      } catch(e) { console.warn('[SYNC] Socket emit failed:', e); }
+    }
   } else if (isOnline) {
     await queueSync('full', appData);
     _hasUnsavedChanges = true;
@@ -2150,8 +2165,8 @@ function renderWeeklyPlan() {
   var dates = getWeekDates(monday);
   var dayLabels = ['周一','周二','周三','周四','周五','周六','周日'];
 
-  // Header row
-  var headerRow = '<th style="width:50px;"></th>';
+  // Header row — 7 columns exactly matching 7 day cells
+  var headerRow = '';
   for (var i = 0; i < 7; i++) {
     var date = dates[i];
     var d = new Date(date + 'T00:00:00');
