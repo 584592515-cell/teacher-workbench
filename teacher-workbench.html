@@ -681,31 +681,37 @@ table input:focus, table select:focus {
 <script>
 // ============ API CONFIG ============
 // 云端同步服务器地址
-// 默认尝试本地云服务器 http://localhost:5000（可通过云同步设置修改）
+// 默认使用 Render 云端服务器 (24小时运行)
 var CLOUD_SERVER_URL = '';
 var API_BASE = '';
-// 优先使用 IndexedDB 中保存的云端地址，否则尝试默认云服务器
-(async function() {
-  try {
-    var saved = await idbGet('settings', 'cloud_server_url');
-    if (saved && saved.value) { CLOUD_SERVER_URL = saved.value; }
-  } catch(e) {}
-  
-  // 如果没有保存的地址，且不是从云服务器加载的，尝试默认云服务器
-  if (!CLOUD_SERVER_URL && window.location.origin.indexOf('localhost:5000') === -1) {
+var DEFAULT_CLOUD_URL = 'https://teacher-workbench-iu49.onrender.com';
+var _cloudConfigReady = null; // Promise that resolves when API_BASE is set
+
+// 初始化云端配置（在 IndexedDB 可用后调用）
+// 修复：桌面端和手机端都统一使用云端服务器，确保数据同步
+function initCloudConfig() {
+  if (_cloudConfigReady) return _cloudConfigReady;
+  _cloudConfigReady = (async function() {
     try {
-      var testResp = await fetch('http://localhost:5000/api/health', { signal: AbortSignal.timeout(2000) });
-      if (testResp.ok) {
-        CLOUD_SERVER_URL = 'http://localhost:5000';
-        try { await idbPut('settings', { key: 'cloud_server_url', value: CLOUD_SERVER_URL }); } catch(e) {}
-        console.log('[CONFIG] 自动发现云服务器:', CLOUD_SERVER_URL);
+      var saved = await idbGet('settings', 'cloud_server_url');
+      if (saved && saved.value) {
+        CLOUD_SERVER_URL = saved.value;
+        console.log('[CONFIG] 使用已保存的云服务器:', CLOUD_SERVER_URL);
       }
-    } catch(e) { /* 云服务器不可用，使用本地模式 */ }
-  }
-  
-  API_BASE = CLOUD_SERVER_URL || window.location.origin;
-  console.log('[CONFIG] API_BASE =', API_BASE, '(cloud:', !!CLOUD_SERVER_URL, ')');
-})();
+    } catch(e) {}
+    
+    // 如果没有保存的地址，使用默认 Render 云服务器（桌面端和手机端统一）
+    if (!CLOUD_SERVER_URL) {
+      CLOUD_SERVER_URL = DEFAULT_CLOUD_URL;
+      try { await idbPut('settings', { key: 'cloud_server_url', value: CLOUD_SERVER_URL }); } catch(e) {}
+      console.log('[CONFIG] 默认云服务器:', CLOUD_SERVER_URL);
+    }
+    
+    API_BASE = CLOUD_SERVER_URL;
+    console.log('[CONFIG] API_BASE =', API_BASE, '(云同步已启用)');
+  })();
+  return _cloudConfigReady;
+}
 const STORAGE_KEY = 'teacher_workbench_data';
 const AUTH_KEY = 'teacher_workbench_auth';
 const DEFAULT_USER = 'chenqi';
@@ -726,27 +732,50 @@ function connectSocket() {
       updateSyncStatus('local');
       return;
     }
-    socket = io(API_BASE, { transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 2000 });
+    if (!API_BASE) {
+      console.warn('[SOCKET] API_BASE not set yet, retrying in 500ms...');
+      setTimeout(connectSocket, 500);
+      return;
+    }
+    // Disconnect existing socket if any
+    if (socket) { try { socket.disconnect(); } catch(e) {} socket = null; }
+    socketConnected = false;
+    
+    console.log('[SOCKET] Connecting to:', API_BASE);
+    socket = io(API_BASE, { 
+      transports: ['websocket', 'polling'], 
+      reconnection: true, 
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
+      reconnectionAttempts: Infinity,
+      timeout: 10000
+    });
+    
     socket.on('connect', function() {
       socketConnected = true;
+      _usingCloud = true;
       updateSyncStatus('online');
-      console.log('Socket.IO connected');
-      // Push any offline changes to server FIRST, then sync down
+      console.log('[SOCKET] Connected to cloud server');
+      // Push any offline changes to server FIRST, then server will send full_sync
       processSyncQueue().then(function() {
         socket.emit('request_sync');
       });
     });
-    socket.on('disconnect', function() {
+    
+    socket.on('disconnect', function(reason) {
       socketConnected = false;
       updateSyncStatus('offline');
-      console.log('Socket.IO disconnected');
+      console.log('[SOCKET] Disconnected:', reason);
     });
-    socket.on('connect_error', function() {
+    
+    socket.on('connect_error', function(err) {
       socketConnected = false;
       updateSyncStatus('disconnected');
+      console.warn('[SOCKET] Connection error:', err.message);
     });
+    
     socket.on('full_sync', function(data) {
-      console.log('Received full sync from server');
+      console.log('[SOCKET] Received full sync from server');
       if (data && typeof data === 'object') {
         // Server is authoritative - its data is the latest saved version
         // Fill any missing keys from defaults, then replace local
@@ -760,8 +789,9 @@ function connectSocket() {
         refreshCurrentPage();
       }
     });
+    
     socket.on('field_updated', function(data) {
-      console.log('Field updated by other client:', data.field);
+      console.log('[SOCKET] Field updated by other client:', data.field);
       if (data.field && data.value !== undefined) {
         appData[data.field] = data.value;
         // Auto-trim if a schedule field was updated
@@ -772,8 +802,9 @@ function connectSocket() {
         refreshCurrentPage();
       }
     });
+    
     socket.on('data_changed', function(data) {
-      console.log('Data changed by other client, reloading:', data.field);
+      console.log('[SOCKET] Data changed by other client, reloading:', data.field);
       // Server is authoritative — replace local with latest server data
       loadFromServer(true);
     });
@@ -1311,7 +1342,7 @@ async function processSyncQueue() {
           });
           if (!resp.ok) throw new Error('Server rejected full sync');
         } else if (item.field && item.value !== undefined) {
-          socket.emit('update_field', { field: item.field, value: item.value });
+          socket.emit('field_updated', { field: item.field, value: item.value });
         }
         successIds.push(item.id);
       } catch(e) { console.warn('[SYNC] Failed to sync item', item.id, e); }
@@ -1565,6 +1596,17 @@ function deepMerge(target, source) {
   for (const key of Object.keys(source)) {
     if (source[key] !== null && typeof source[key] === 'object' && !Array.isArray(source[key]) && target[key] !== null && typeof target[key] === 'object' && !Array.isArray(target[key])) {
       result[key] = deepMerge(target[key], source[key]);
+    } else if (Array.isArray(source[key]) && Array.isArray(target[key]) && source[key].length > 0 && target[key].length > 0 && typeof source[key][0] === 'object' && source[key][0] !== null && typeof source[key][0].id !== 'undefined') {
+      // ID-based merge: preserve target items not in source, update matching items
+      var merged = [...source[key]];
+      for (var ti = 0; ti < target[key].length; ti++) {
+        var tItem = target[key][ti];
+        if (tItem && typeof tItem === 'object' && typeof tItem.id !== 'undefined') {
+          var found = merged.find(function(m) { return m.id === tItem.id; });
+          if (!found) merged.push(tItem);
+        }
+      }
+      result[key] = merged;
     } else {
       result[key] = source[key];
     }
@@ -1725,7 +1767,7 @@ function renderDashboard() {
 
   // Today's class schedule (from classSchedule)
   const cs = appData.classSchedule[tk] || [];
-  const csPeriods = (appData.classSchedule.periods || []).slice(0, 10); // Cap to prevent performance issues
+  const csPeriods = appData.classSchedule.periods || [];
   const csTimes = appData.classSchedule.periodTimes || [];
   let csHTML = '';
   const csItems = [];
@@ -1743,7 +1785,7 @@ function renderDashboard() {
 
   // Today's personal schedule
   const ps = appData.personalSchedule[tk] || [];
-  const psPeriods = (appData.personalSchedule.periods || []).slice(0, 10); // Cap to prevent performance issues
+  const psPeriods = appData.personalSchedule.periods || [];
   const psTimes = appData.personalSchedule.periodTimes || [];
   let psHTML = '';
   const psItems = [];
@@ -1918,12 +1960,14 @@ function autoCalcFemale() {
 function renderClassSchedule() {
   const cs = appData.classSchedule;
   const days = ['星期一','星期二','星期三','星期四','星期五'];
-  let html = '<div class="header"><h1>📅 班级课程表</h1><button class="btn btn-outline btn-sm" onclick="exportClassSchedule()">📥 导出CSV</button></div><div class="card"><div class="table-wrap"><table class="schedule-table"><thead><tr><th>时段</th><th>时间</th>';
+  let html = '<div class="header"><h1>📅 班级课程表</h1><div class="btn-group"><button class="btn btn-outline btn-sm" onclick="exportClassSchedule()">📥 导出CSV</button><button class="btn btn-sm btn-primary" onclick="addClassSchedulePeriod()">➕ 增加时段</button></div></div><div class="card"><div class="table-wrap"><table class="schedule-table"><thead><tr><th style="width:50px;"></th><th>时段</th><th>时间</th>';
   days.forEach(d => html += `<th>${d}</th>`);
   html += '</tr></thead><tbody>';
-  cs.periods.slice(0, 10).forEach((p, pi) => {
+  const totalPeriods = cs.periods.length;
+  cs.periods.forEach((p, pi) => {
     const timeVal = (cs.periodTimes && cs.periodTimes[pi]) || '';
-    html += `<tr><td style="font-weight:600;">${escapeHtml(p)}</td><td><input value="${escapeHtml(timeVal)}" data-time-idx="${pi}" class="cs-time-input" style="width:100px;text-align:center;" placeholder="如 8:00-8:45"></td>`;
+    const delBtn = totalPeriods > 3 ? `<button class="btn btn-sm btn-danger" onclick="deleteClassSchedulePeriod(${pi})" title="删除时段" style="padding:2px 8px;">✕</button>` : '';
+    html += `<tr><td style="text-align:center;">${delBtn}</td><td style="font-weight:600;">${escapeHtml(p)}</td><td><input value="${escapeHtml(timeVal)}" data-time-idx="${pi}" class="cs-time-input" style="width:100px;text-align:center;" placeholder="如 8:00-8:45"></td>`;
     weekKeys.slice(0,5).forEach(wk => {
       const val = (cs[wk] && cs[wk][pi]) || '';
       html += `<td><input value="${escapeHtml(val)}" data-week="${wk}" data-period="${pi}" class="cs-input" placeholder=""></td>`;
@@ -1934,17 +1978,49 @@ function renderClassSchedule() {
   return html;
 }
 
+function addClassSchedulePeriod() {
+  var cs = appData.classSchedule;
+  var newIdx = cs.periods.length;
+  var defaultName = '第' + (newIdx + 1) + '节';
+  cs.periods.push(defaultName);
+  // Extend periodTimes
+  if (!cs.periodTimes) cs.periodTimes = [];
+  cs.periodTimes.push('');
+  // Extend each weekday
+  weekKeys.slice(0,5).forEach(function(wk) {
+    if (!cs[wk]) cs[wk] = [];
+    while (cs[wk].length < cs.periods.length) cs[wk].push('');
+  });
+  toast('✅ 已增加时段: ' + defaultName, 'success');
+  navigateTo('class-schedule');
+}
+
+function deleteClassSchedulePeriod(idx) {
+  var cs = appData.classSchedule;
+  if (cs.periods.length <= 3) { toast('⚠️ 至少保留3个时段', 'warning'); return; }
+  var name = cs.periods[idx];
+  if (!confirm('确定删除时段「' + name + '」吗？该时段在所有星期中的课程安排也将被删除。')) return;
+  // Remove from all arrays
+  cs.periods.splice(idx, 1);
+  if (cs.periodTimes) cs.periodTimes.splice(idx, 1);
+  weekKeys.slice(0,5).forEach(function(wk) {
+    if (cs[wk] && cs[wk].length > idx) cs[wk].splice(idx, 1);
+  });
+  toast('已删除时段: ' + name, 'info');
+  navigateTo('class-schedule');
+}
+
 function saveClassSchedule() {
-  var maxIdx = (appData.classSchedule.periods && appData.classSchedule.periods.length) || 10;
+  var maxIdx = appData.classSchedule.periods.length;
   $$('.cs-input').forEach(inp => {
     const wk = inp.dataset.week, pi = parseInt(inp.dataset.period);
-    if (pi >= maxIdx) return; // Guard against array inflation
+    if (pi >= maxIdx) return;
     if (!appData.classSchedule[wk]) appData.classSchedule[wk] = [];
     appData.classSchedule[wk][pi] = inp.value;
   });
   $$('.cs-time-input').forEach(inp => {
     const pi = parseInt(inp.dataset.timeIdx);
-    if (pi >= maxIdx) return; // Guard against array inflation
+    if (pi >= maxIdx) return;
     if (!appData.classSchedule.periodTimes) appData.classSchedule.periodTimes = [];
     appData.classSchedule.periodTimes[pi] = inp.value;
   });
@@ -1957,7 +2033,7 @@ function exportClassSchedule() {
   var cs = appData.classSchedule;
   var days = ['星期一','星期二','星期三','星期四','星期五'];
   var csv = '\uFEFF时段,' + days.join(',') + '\n';
-  cs.periods.slice(0, 10).forEach(function(p, pi) {
+  cs.periods.forEach(function(p, pi) {
     var row = [escapeCSV(p)];
     weekKeys.slice(0,5).forEach(function(wk) { row.push(escapeCSV((cs[wk]&&cs[wk][pi])||'')); });
     csv += row.join(',') + '\n';
@@ -3109,14 +3185,19 @@ function renderMySchedule() {
   const days = ['星期一','星期二','星期三','星期四','星期五'];
   let html = `<div class="header">
     <h1>🗓️ 个人教学课表</h1>
-    <button class="btn btn-outline btn-sm" onclick="exportMySchedule()">📤 导出CSV</button>
+    <div class="btn-group">
+      <button class="btn btn-outline btn-sm" onclick="exportMySchedule()">📤 导出CSV</button>
+      <button class="btn btn-sm btn-primary" onclick="addPersonalSchedulePeriod()">➕ 增加时段</button>
+    </div>
   </div>
-  <div class="card"><div class="table-wrap"><table class="schedule-table"><thead><tr><th>时段</th><th>时间</th>`;
+  <div class="card"><div class="table-wrap"><table class="schedule-table"><thead><tr><th style="width:50px;"></th><th>时段</th><th>时间</th>`;
   days.forEach(d => html += `<th>${d}</th>`);
   html += '</tr></thead><tbody>';
-  ps.periods.slice(0, 10).forEach((p, pi) => {
+  const totalPeriods = ps.periods.length;
+  ps.periods.forEach((p, pi) => {
     const timeVal = (ps.periodTimes && ps.periodTimes[pi]) || '';
-    html += `<tr><td style="font-weight:600;">${escapeHtml(p)}</td><td><input value="${escapeHtml(timeVal)}" data-time-idx="${pi}" class="ps-time-input" style="width:100px;text-align:center;" placeholder="如 8:00-8:45"></td>`;
+    const delBtn = totalPeriods > 3 ? `<button class="btn btn-sm btn-danger" onclick="deletePersonalSchedulePeriod(${pi})" title="删除时段" style="padding:2px 8px;">✕</button>` : '';
+    html += `<tr><td style="text-align:center;">${delBtn}</td><td style="font-weight:600;">${escapeHtml(p)}</td><td><input value="${escapeHtml(timeVal)}" data-time-idx="${pi}" class="ps-time-input" style="width:100px;text-align:center;" placeholder="如 8:00-8:45"></td>`;
     weekKeys.slice(0,5).forEach(wk => {
       const val = (ps[wk] && ps[wk][pi]) || '';
       html += `<td><input value="${escapeHtml(val)}" data-week="${wk}" data-period="${pi}" class="ps-input" placeholder=""></td>`;
@@ -3139,17 +3220,46 @@ function renderMySchedule() {
   return html;
 }
 
+function addPersonalSchedulePeriod() {
+  var ps = appData.personalSchedule;
+  var newIdx = ps.periods.length;
+  var defaultName = '第' + (newIdx + 1) + '节';
+  ps.periods.push(defaultName);
+  if (!ps.periodTimes) ps.periodTimes = [];
+  ps.periodTimes.push('');
+  weekKeys.slice(0,5).forEach(function(wk) {
+    if (!ps[wk]) ps[wk] = [];
+    while (ps[wk].length < ps.periods.length) ps[wk].push('');
+  });
+  toast('✅ 已增加时段: ' + defaultName, 'success');
+  navigateTo('my-schedule');
+}
+
+function deletePersonalSchedulePeriod(idx) {
+  var ps = appData.personalSchedule;
+  if (ps.periods.length <= 3) { toast('⚠️ 至少保留3个时段', 'warning'); return; }
+  var name = ps.periods[idx];
+  if (!confirm('确定删除时段「' + name + '」吗？该时段在所有星期中的课程安排也将被删除。')) return;
+  ps.periods.splice(idx, 1);
+  if (ps.periodTimes) ps.periodTimes.splice(idx, 1);
+  weekKeys.slice(0,5).forEach(function(wk) {
+    if (ps[wk] && ps[wk].length > idx) ps[wk].splice(idx, 1);
+  });
+  toast('已删除时段: ' + name, 'info');
+  navigateTo('my-schedule');
+}
+
 function savePersonalSchedule() {
-  var maxIdx = (appData.personalSchedule.periods && appData.personalSchedule.periods.length) || 10;
+  var maxIdx = appData.personalSchedule.periods.length;
   $$('.ps-input').forEach(inp => {
     const wk = inp.dataset.week, pi = parseInt(inp.dataset.period);
-    if (pi >= maxIdx) return; // Guard against array inflation
+    if (pi >= maxIdx) return;
     if (!appData.personalSchedule[wk]) appData.personalSchedule[wk] = [];
     appData.personalSchedule[wk][pi] = inp.value;
   });
   $$('.ps-time-input').forEach(inp => {
     const pi = parseInt(inp.dataset.timeIdx);
-    if (pi >= maxIdx) return; // Guard against array inflation
+    if (pi >= maxIdx) return;
     if (!appData.personalSchedule.periodTimes) appData.personalSchedule.periodTimes = [];
     appData.personalSchedule.periodTimes[pi] = inp.value;
   });
@@ -3161,7 +3271,7 @@ function exportMySchedule() {
   var ps = appData.personalSchedule;
   var days = ['星期一','星期二','星期三','星期四','星期五'];
   var csv = '\uFEFF时段,' + days.join(',') + '\n';
-  ps.periods.slice(0, 10).forEach(function(p, pi) {
+  ps.periods.forEach(function(p, pi) {
     var row = [escapeCSV(p)];
     weekKeys.slice(0,5).forEach(function(wk) { row.push(escapeCSV((ps[wk]&&ps[wk][pi])||'')); });
     csv += row.join(',') + '\n';
@@ -3426,16 +3536,18 @@ async function init() {
   _initCalled = true;
   // 1. Load local data FIRST (from IndexedDB) so appData has offline changes
   await loadLocalData();
-  // 2. Now connect to server (connect event will push queue then pull from server)
+  // 2. Init cloud config (must complete before connecting socket)
+  await initCloudConfig();
+  // 3. Now connect to server (connect event will push queue then pull from server)
   setupNavigation();
   updateOnlineStatus();
   connectSocket();
-  // 3. If socket not available, try REST fallback
+  // 4. If socket not available, try REST fallback
   if (typeof io === 'undefined') {
     var loaded = await loadFromServer(true);
     if (!loaded) useApi = false;
   }
-  // 4. Render
+  // 5. Render
   if (currentPage) navigateTo(currentPage);
   else navigateTo('dashboard');
 }
