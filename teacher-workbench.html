@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>初中班主任工作台</title>
 <meta name="theme-color" content="#4A90D9">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -38,7 +38,9 @@ body {
   color: var(--text);
   display: flex;
   min-height: 100vh;
+  overflow-x: hidden;
 }
+html { overflow-x: hidden; }
 /* Sidebar */
 .sidebar {
   width: var(--sidebar-w);
@@ -146,7 +148,7 @@ body {
 .stat-card.warn .num { color: var(--warning); }
 
 /* Tables */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 table th {
   background: var(--primary-light);
@@ -562,7 +564,8 @@ table input:focus, table select:focus {
   }
   .sidebar.open { transform: translateX(0); }
   .mobile-nav-toggle { display: flex; }
-  .main { margin-left: 0 !important; max-width: 100vw !important; padding: 12px 12px !important; }
+  .main { margin-left: 0 !important; max-width: 100vw !important; padding: 12px 12px !important; overflow-x: hidden; }
+  .table-wrap { -webkit-overflow-scrolling: touch; touch-action: pan-x pinch-zoom; overflow-x: auto; }
   .main.padded-top { padding-top: 40px !important; }
   .header { flex-direction: column; align-items: flex-start; gap: 4px; }
   .header h1 { font-size: 18px; }
@@ -2095,13 +2098,13 @@ function addWeeklyPlanItem(date) {
 function deleteWeeklyPlanItem(date, itemId) {
   var items = appData.workPlan[date];
   if (!items) return;
-  var idx = -1;
-  for (var i = 0; i < items.length; i++) {
-    if (items[i].id === itemId) { idx = i; break; }
+  // Find by ID
+  for (var i = items.length - 1; i >= 0; i--) {
+    if (items[i] && items[i].id === itemId) {
+      items.splice(i, 1);
+      break;
+    }
   }
-  if (idx === -1) return;
-  if (!confirm('确定删除该工作计划项吗？')) return;
-  items.splice(idx, 1);
   if (items.length === 0) delete appData.workPlan[date];
   saveData();
   navigateTo('weekly-plan');
@@ -2313,6 +2316,7 @@ function addClassSchedulePeriod() {
     while (cs[wk].length < cs.periods.length) cs[wk].push('');
   });
   toast('✅ 已增加时段: ' + defaultName, 'success');
+  saveData();
   navigateTo('class-schedule');
 }
 
@@ -2320,7 +2324,6 @@ function deleteClassSchedulePeriod(idx) {
   var cs = appData.classSchedule;
   if (cs.periods.length <= 3) { toast('⚠️ 至少保留3个时段', 'warning'); return; }
   var name = cs.periods[idx];
-  if (!confirm('确定删除时段「' + name + '」吗？该时段在所有星期中的课程安排也将被删除。')) return;
   // Remove from all arrays
   cs.periods.splice(idx, 1);
   if (cs.periodTimes) cs.periodTimes.splice(idx, 1);
@@ -2328,6 +2331,7 @@ function deleteClassSchedulePeriod(idx) {
     if (cs[wk] && cs[wk].length > idx) cs[wk].splice(idx, 1);
   });
   toast('已删除时段: ' + name, 'info');
+  saveData();
   navigateTo('class-schedule');
 }
 
@@ -3553,6 +3557,7 @@ function addPersonalSchedulePeriod() {
     while (ps[wk].length < ps.periods.length) ps[wk].push('');
   });
   toast('✅ 已增加时段: ' + defaultName, 'success');
+  saveData();
   navigateTo('my-schedule');
 }
 
@@ -3560,13 +3565,13 @@ function deletePersonalSchedulePeriod(idx) {
   var ps = appData.personalSchedule;
   if (ps.periods.length <= 3) { toast('⚠️ 至少保留3个时段', 'warning'); return; }
   var name = ps.periods[idx];
-  if (!confirm('确定删除时段「' + name + '」吗？该时段在所有星期中的课程安排也将被删除。')) return;
   ps.periods.splice(idx, 1);
   if (ps.periodTimes) ps.periodTimes.splice(idx, 1);
   weekKeys.slice(0,5).forEach(function(wk) {
     if (ps[wk] && ps[wk].length > idx) ps[wk].splice(idx, 1);
   });
   toast('已删除时段: ' + name, 'info');
+  saveData();
   navigateTo('my-schedule');
 }
 
