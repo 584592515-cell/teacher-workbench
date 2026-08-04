@@ -176,9 +176,11 @@ app.post('/api/data', (req, res) => {
 
     saveData(merged);
 
-    // Broadcast to all connected clients
+    // Broadcast to all connected clients (including sender for consistency)
     io.emit('full_sync', merged);
-    console.log('[SYNC] Broadcast full_sync to', io.engine.clientsCount, 'clients');
+    // Also broadcast workPlan specifically for immediate UI updates
+    io.emit('field_updated', { field: 'workPlan', value: merged.workPlan || {} });
+    console.log('[SYNC] Broadcast full_sync + field_updated to', io.engine.clientsCount, 'clients');
 
     res.json({ success: true, _lastModified: merged._lastModified });
   } catch (e) {
