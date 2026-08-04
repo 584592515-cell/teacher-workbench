@@ -234,6 +234,61 @@ table input:focus, table select:focus {
 .plan-item .checkbox.done::after { content: '✓'; color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; height: 100%; }
 .plan-item .plan-text { flex:1; font-size:14px; }
 .plan-item .plan-text.done-text { text-decoration: line-through; color: var(--text-light); }
+/* Dashboard plan dot */
+.plan-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--primary); flex-shrink: 0; margin-top: 6px;
+}
+/* Weekly Plan Table */
+.weekly-plan-table { min-width: 1000px; }
+.weekly-plan-table th { position: sticky; top: 0; z-index: 1; }
+.weekly-plan-table td { border-right: 1px solid var(--border); }
+.weekly-plan-table td:last-child { border-right: none; }
+/* Weekly plan item cell */
+.wp-item-cell {
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  position: relative;
+}
+.wp-item-cell:hover { background: #EDF2FA; }
+.wp-item-text {
+  font-size: 13px; font-weight: 500;
+  line-height: 1.5; margin-bottom: 6px;
+  word-break: break-all;
+}
+.wp-item-actions {
+  display: flex; gap: 4px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 4px; margin-top: 4px;
+}
+.wp-item-actions .btn { padding: 2px 6px; font-size: 11px; }
+/* Photo thumbnails */
+.wp-photo-row {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-bottom: 6px;
+}
+.wp-photo-wrap {
+  position: relative; display: inline-block;
+}
+.wp-photo-thumb {
+  width: 56px; height: 56px;
+  object-fit: cover; border-radius: 4px;
+  cursor: pointer; border: 1px solid var(--border);
+  transition: transform 0.15s;
+}
+.wp-photo-thumb:hover { transform: scale(1.08); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.wp-photo-del {
+  position: absolute; top: -6px; right: -6px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--danger); color: #fff;
+  border: none; font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1; padding: 0;
+}
+.wp-photo-del:hover { opacity: 0.8; }
 /* Tags */
 .tag {
   display: inline-block; padding: 2px 8px; border-radius: 12px;
@@ -608,11 +663,12 @@ table input:focus, table select:focus {
     <div class="nav-group">
       <div class="nav-group-title">总览</div>
       <div class="nav-item active" data-page="dashboard">
-        <span class="icon">📊</span> 工作台仪表盘
+        <span class="icon">📊</span> 工作台
       </div>
     </div>
     <div class="nav-group">
       <div class="nav-group-title">班级管理</div>
+      <div class="nav-item" data-page="weekly-plan"><span class="icon">📋</span> 工作计划</div>
       <div class="nav-item" data-page="class-info"><span class="icon">🏫</span> 班级总体信息</div>
       <div class="nav-item" data-page="class-schedule"><span class="icon">📅</span> 班级课程表</div>
       <div class="nav-item" data-page="students"><span class="icon">👥</span> 班级成员信息</div>
@@ -1746,6 +1802,7 @@ function navigateTo(page) {
   let html = '';
   switch(page) {
     case 'dashboard': html = renderDashboard(); break;
+    case 'weekly-plan': html = renderWeeklyPlan(); break;
     case 'class-info': html = renderClassInfo(); break;
     case 'class-schedule': html = renderClassSchedule(); break;
     case 'students': html = renderStudents(); break;
@@ -1773,25 +1830,29 @@ function renderDashboard() {
   const tk = getTodayWeekKey();
   const tmk = getTomorrowWeekKey();
 
-  // Today's work plan
-  const plans = appData.workPlan[t] || [];
-  let planHTML = plans.length === 0
-    ? '<div class="empty-state"><div class="empty-icon">📋</div><p>暂无今日工作计划，点击下方添加</p></div>'
-    : plans.map((p, i) => `<div class="plan-item">
-        <div class="checkbox ${p.done?'done':''}" data-plan-idx="${i}" data-plan-date="${t}" data-plan-action="toggle"></div>
-        <span class="plan-text ${p.done?'done-text':''}">${escapeHtml(p.text)}</span>
-        <button class="btn btn-sm btn-ghost" data-plan-idx="${i}" data-plan-date="${t}" data-plan-action="delete">×</button>
-      </div>`).join('');
+  // —— Helper: render work plan items as read-only list ——
+  function renderPlanItems(date, emptyMsg) {
+    const items = appData.workPlan[date] || [];
+    if (items.length === 0) {
+      return `<div class="empty-state"><div class="empty-icon">📋</div><p>${emptyMsg}</p></div>`;
+    }
+    return items.map((p) => {
+      let photosHTML = '';
+      if (p.photos && p.photos.length > 0) {
+        photosHTML = '<div class="wp-photo-row">' + p.photos.map((ph, pi) =>
+          `<img src="${ph}" class="wp-photo-thumb" onclick="viewPhoto('${date}','${p.id}','${pi}')" title="点击查看大图">`
+        ).join('') + '</div>';
+      }
+      return `<div class="plan-item">
+        <span class="plan-dot"></span>
+        <span class="plan-text">${escapeHtml(p.text)}</span>
+        ${photosHTML}
+      </div>`;
+    }).join('');
+  }
 
-  // Tomorrow's work plan
-  const tmPlans = appData.workPlan[tm] || [];
-  let tmPlanHTML = tmPlans.length === 0
-    ? '<div class="empty-state"><div class="empty-icon">📋</div><p>暂无明日工作计划，点击下方添加</p></div>'
-    : tmPlans.map((p, i) => `<div class="plan-item">
-        <div class="checkbox ${p.done?'done':''}" data-plan-idx="${i}" data-plan-date="${tm}" data-plan-action="toggle"></div>
-        <span class="plan-text ${p.done?'done-text':''}">${escapeHtml(p.text)}</span>
-        <button class="btn btn-sm btn-ghost" data-plan-idx="${i}" data-plan-date="${tm}" data-plan-action="delete">×</button>
-      </div>`).join('');
+  const todayPlanHTML = renderPlanItems(t, '暂无今日工作计划，请到班级管理→工作计划中添加');
+  const tomorrowPlanHTML = renderPlanItems(tm, '暂无明日工作计划');
 
   // Today's class schedule (from classSchedule)
   const cs = appData.classSchedule[tk] || [];
@@ -1863,7 +1924,7 @@ function renderDashboard() {
 
   return `
     <div class="header">
-      <h1>📊 工作台仪表盘</h1>
+      <h1>📊 工作台</h1>
       <span class="date">${formatDate(new Date())} 星期${getWeekDay()}</span>
     </div>
     <div class="card">
@@ -1875,18 +1936,18 @@ function renderDashboard() {
         <div class="card">
           <div class="card-header">
             <h3><span class="card-icon">📋</span>今日工作计划</h3>
-            <button class="btn btn-sm btn-primary" onclick="addWorkPlan('${t}')">+ 添加任务</button>
+            <span style="font-size:12px;color:var(--text-light);">来自周工作计划</span>
           </div>
-          <div>${planHTML}</div>
+          <div>${todayPlanHTML}</div>
         </div>
       </div>
       <div>
         <div class="card">
           <div class="card-header">
             <h3><span class="card-icon">📝</span>明日工作计划</h3>
-            <button class="btn btn-sm btn-outline" onclick="addWorkPlan('${tm}')">+ 添加任务</button>
+            <span style="font-size:12px;color:var(--text-light);">来自周工作计划</span>
           </div>
-          <div>${tmPlanHTML}</div>
+          <div>${tomorrowPlanHTML}</div>
         </div>
       </div>
     </div>
@@ -1942,6 +2003,219 @@ function deleteWorkPlan(date, idx) {
     saveData();
     navigateTo('dashboard');
   }
+}
+
+// ============ WEEKLY WORK PLAN ============
+let weeklyPlanBaseMonday = null;
+
+function getMondayOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function getWeekDates(monday) {
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(d.getDate() + i);
+    dates.push(formatDateISO(d));
+  }
+  return dates;
+}
+
+function formatDateISO(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+
+function getWeekLabel(monday) {
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  return monday.getMonth() + 1 + '月' + monday.getDate() + '日 - ' + sunday.getMonth() + 1 + '月' + sunday.getDate() + '日';
+}
+
+function navigateWeek(delta) {
+  if (!weeklyPlanBaseMonday) weeklyPlanBaseMonday = getMondayOfWeek(new Date());
+  weeklyPlanBaseMonday.setDate(weeklyPlanBaseMonday.getDate() + delta * 7);
+  navigateTo('weekly-plan');
+}
+
+function viewPhoto(date, itemId, photoIdx) {
+  const items = appData.workPlan[date] || [];
+  const item = items.find(function(p) { return p.id === itemId; });
+  if (!item || !item.photos || !item.photos[photoIdx]) return;
+  const src = item.photos[photoIdx];
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+  overlay.onclick = function(e) {
+    if (e.target === overlay) document.body.removeChild(overlay);
+  };
+  overlay.innerHTML = '<div style="position:relative;max-width:92vw;max-height:92vh;">' +
+    '<img src="' + src + '" style="max-width:90vw;max-height:85vh;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,0.3);">' +
+    '<button style="position:absolute;top:-36px;right:0;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:32px;height:32px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;" onclick="var p=this.parentElement.parentElement;document.body.removeChild(p);">×</button>' +
+    '</div>';
+  document.body.appendChild(overlay);
+}
+
+function addWeeklyPlanItem(date) {
+  var d = new Date(date + 'T00:00:00');
+  var days = ['日','一','二','三','四','五','六'];
+  var label = (d.getMonth()+1) + '月' + d.getDate() + '日 星期' + days[d.getDay()];
+  var text = prompt('请输入 ' + label + ' 工作计划内容：');
+  if (!text || !text.trim()) return;
+  if (!appData.workPlan[date]) appData.workPlan[date] = [];
+  appData.workPlan[date].push({ id: genWPId(), text: text.trim(), done: false, photos: [] });
+  saveData();
+  navigateTo('weekly-plan');
+}
+
+function deleteWeeklyPlanItem(date, itemId) {
+  var items = appData.workPlan[date];
+  if (!items) return;
+  var idx = -1;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].id === itemId) { idx = i; break; }
+  }
+  if (idx === -1) return;
+  if (!confirm('确定删除该工作计划项吗？')) return;
+  items.splice(idx, 1);
+  if (items.length === 0) delete appData.workPlan[date];
+  saveData();
+  navigateTo('weekly-plan');
+}
+
+function uploadPlanPhoto(date, itemId) {
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.multiple = true;
+  input.onchange = function() {
+    if (!input.files || input.files.length === 0) return;
+    var items = appData.workPlan[date];
+    if (!items) return;
+    var item = null;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].id === itemId) { item = items[i]; break; }
+    }
+    if (!item) return;
+    if (!item.photos) item.photos = [];
+
+    var loaded = 0;
+    var total = input.files.length;
+    var files = Array.from(input.files);
+    files.forEach(function(file) {
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        item.photos.push(e.target.result);
+        loaded++;
+        if (loaded === total) {
+          saveData();
+          navigateTo('weekly-plan');
+          showToast('照片上传成功', 'success');
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+  input.click();
+}
+
+function removePlanPhoto(date, itemId, photoIdx) {
+  var items = appData.workPlan[date];
+  if (!items) return;
+  var item = null;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].id === itemId) { item = items[i]; break; }
+  }
+  if (!item || !item.photos) return;
+  item.photos.splice(photoIdx, 1);
+  saveData();
+  navigateTo('weekly-plan');
+}
+
+function renderWeeklyPlan() {
+  if (!weeklyPlanBaseMonday) {
+    weeklyPlanBaseMonday = getMondayOfWeek(new Date());
+  }
+
+  var monday = weeklyPlanBaseMonday;
+  var dates = getWeekDates(monday);
+  var dayLabels = ['周一','周二','周三','周四','周五','周六','周日'];
+
+  // Header row
+  var headerRow = '<th style="width:50px;"></th>';
+  for (var i = 0; i < 7; i++) {
+    var date = dates[i];
+    var d = new Date(date + 'T00:00:00');
+    var isToday = date === today();
+    var isTomorrow = date === tomorrow();
+    var style = 'text-align:center;min-width:150px;';
+    if (isToday) style += 'background:#E8F5E9;';
+    headerRow += '<th style="' + style + '">' +
+      '<div style="font-size:14px;font-weight:600;">' + dayLabels[i] + '</div>' +
+      '<div style="font-size:11px;color:var(--text-light);">' + (d.getMonth()+1) + '/' + d.getDate() + '</div>' +
+      (isToday ? '<span class="tag tag-green" style="margin-top:3px;">今天</span>' : '') +
+      (isTomorrow ? '<span class="tag tag-blue" style="margin-top:3px;">明天</span>' : '') +
+      '</th>';
+  }
+
+  // Content row - one cell per day
+  var cells = '';
+  for (var j = 0; j < 7; j++) {
+    var date2 = dates[j];
+    var items = appData.workPlan[date2] || [];
+    cells += '<td style="vertical-align:top;padding:8px;">';
+    if (items.length === 0) {
+      cells += '<div class="empty-state" style="padding:8px;"><p style="font-size:12px;">暂无计划</p></div>';
+    } else {
+      for (var k = 0; k < items.length; k++) {
+        var item = items[k];
+        cells += '<div class="wp-item-cell">' +
+          '<div class="wp-item-text">' + escapeHtml(item.text) + '</div>';
+        // Photos
+        if (item.photos && item.photos.length > 0) {
+          cells += '<div class="wp-photo-row">';
+          for (var pi = 0; pi < item.photos.length; pi++) {
+            cells += '<div class="wp-photo-wrap">' +
+              '<img src="' + item.photos[pi] + '" class="wp-photo-thumb" onclick="viewPhoto(\'' + date2 + '\',\'' + item.id + '\',\'' + pi + '\')" title="点击查看大图">' +
+              '<button class="wp-photo-del" onclick="event.stopPropagation();removePlanPhoto(\'' + date2 + '\',\'' + item.id + '\',\'' + pi + '\')" title="删除照片">×</button>' +
+              '</div>';
+          }
+          cells += '</div>';
+        }
+        cells += '<div class="wp-item-actions">' +
+          '<button class="btn btn-sm btn-ghost" onclick="uploadPlanPhoto(\'' + date2 + '\',\'' + item.id + '\')" title="上传照片">📷</button>' +
+          '<button class="btn btn-sm btn-ghost" onclick="deleteWeeklyPlanItem(\'' + date2 + '\',\'' + item.id + '\')" title="删除">🗑️</button>' +
+          '</div></div>';
+      }
+    }
+    cells += '<button class="btn btn-sm btn-outline" style="width:100%;margin-top:6px;" onclick="addWeeklyPlanItem(\'' + date2 + '\')">+ 添加</button>';
+    cells += '</td>';
+  }
+
+  var weekLabel = getWeekLabel(monday);
+
+  return '<div class="header">' +
+    '<h1>📋 工作计划</h1>' +
+    '<div style="display:flex;align-items:center;gap:12px;">' +
+    '<button class="btn btn-sm btn-outline" onclick="navigateWeek(-1)">← 上一周</button>' +
+    '<span style="font-weight:600;font-size:14px;">' + weekLabel + '</span>' +
+    '<button class="btn btn-sm btn-outline" onclick="navigateWeek(1)">下一周 →</button>' +
+    '<button class="btn btn-sm btn-ghost" onclick="weeklyPlanBaseMonday=getMondayOfWeek(new Date());navigateTo(\'weekly-plan\');" title="回到本周">📍 本周</button>' +
+    '</div></div>' +
+    '<div class="card"><div class="table-wrap">' +
+    '<table class="weekly-plan-table"><thead><tr>' + headerRow + '</tr></thead>' +
+    '<tbody><tr>' + cells + '</tr></tbody></table>' +
+    '</div></div>';
 }
 
 // ============ CLASS INFO ============
@@ -3544,18 +3818,15 @@ async function saveFileWithPicker(filename, content, mimeType) {
 function bindPageEvents(page) {
   switch(page) {
     case 'dashboard':
-      document.querySelectorAll('[data-plan-action="toggle"]').forEach(el => {
-        el.onclick = () => toggleWorkPlan(el.dataset.planDate, parseInt(el.dataset.planIdx));
-      });
-      document.querySelectorAll('[data-plan-action="delete"]').forEach(el => {
-        el.onclick = () => deleteWorkPlan(el.dataset.planDate, parseInt(el.dataset.planIdx));
-      });
+      // Work plan items are now read-only with photo click handlers inline
       break;
     case 'grades':
-      // Initial exam content render
       if (appData.grades.exams.length > 0) {
         renderExamContent(0);
       }
+      break;
+    case 'weekly-plan':
+      // All interactions use inline onclick handlers
       break;
   }
 }
@@ -3622,15 +3893,21 @@ function migrateWorkPlanIds() {
     var items = appData.workPlan[dateKey];
     if (!Array.isArray(items)) return;
     for (var i = 0; i < items.length; i++) {
-      if (items[i] && typeof items[i] === 'object' && !items[i].id) {
-        items[i].id = genWPId();
-        modified = true;
+      if (items[i] && typeof items[i] === 'object') {
+        if (!items[i].id) {
+          items[i].id = genWPId();
+          modified = true;
+        }
+        if (!items[i].photos) {
+          items[i].photos = [];
+          modified = true;
+        }
       }
     }
   });
   if (modified) {
     saveDataLocal(true);
-    console.log('[MIGRATE] Added IDs to workPlan items');
+    console.log('[MIGRATE] Updated workPlan items (IDs + photos)');
   }
 }
 
