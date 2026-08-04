@@ -176,11 +176,13 @@ app.post('/api/data', (req, res) => {
 
     saveData(merged);
 
-    // Broadcast to all connected clients (including sender for consistency)
-    io.emit('full_sync', merged);
-    // Also broadcast workPlan specifically for immediate UI updates
-    io.emit('field_updated', { field: 'workPlan', value: merged.workPlan || {} });
-    console.log('[SYNC] Broadcast full_sync + field_updated to', io.engine.clientsCount, 'clients');
+    // Broadcast to OTHER clients only (NOT the sender — sender already has the data)
+    // Using io.except() is not possible here since we don't have the socket ID from the HTTP request.
+    // Instead, we rely on the Socket.IO event handlers:
+    // - Other clients will receive updates when this client emits 'field_updated' via Socket.IO
+    // - Or when they explicitly request_sync
+    // Sending full_sync back to the sender causes a re-render that can revert UI changes.
+    console.log('[SYNC] Data saved by HTTP POST — not broadcasting to avoid sender re-render');
 
     res.json({ success: true, _lastModified: merged._lastModified });
   } catch (e) {

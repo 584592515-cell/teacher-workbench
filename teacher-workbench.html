@@ -836,6 +836,12 @@ function connectSocket() {
     socket.on('full_sync', function(data) {
       console.log('[SOCKET] Received full sync from server');
       if (data && typeof data === 'object') {
+        // Protection: if there are unsaved local changes, skip merge to avoid overwriting
+        // User's local changes take priority; they will be pushed to server on next save
+        if (_hasUnsavedChanges) {
+          console.log('[SOCKET] Local has unsaved changes — skipping full_sync merge, preserving local data');
+          return;
+        }
         // Merge server data into current local data (preserve local unsaved changes)
         // Items with matching IDs get replaced by server version; unique local items survive
         appData = deepMerge(appData, data);
