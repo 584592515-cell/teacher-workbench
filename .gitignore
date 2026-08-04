@@ -1,0 +1,29 @@
+# Build artifacts
+build/
+dist/
+
+# Dependencies
+cloud-server/node_modules/
+
+# Data files (don't commit user data)
+*.db
+*.sqlite
+data/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+envs/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WorkBuddy
+.workbuddy/
