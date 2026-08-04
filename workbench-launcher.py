@@ -42,21 +42,39 @@ def deep_merge(target, source):
             if isinstance(tv, dict) and isinstance(sv, dict):
                 result[key] = deep_merge(tv, sv)
             elif isinstance(tv, list) and isinstance(sv, list):
-                # If items are dicts (records), concat unique items
+                # If items are dicts (records), merge by ID or by text
                 if sv and isinstance(sv[0], dict):
-                    merged = list(tv)
-                    for sv_item in sv:
-                        exists = False
-                        for mv_item in merged:
-                            if isinstance(sv_item, dict) and isinstance(mv_item, dict):
-                                if sv_item == mv_item:
-                                    exists = True
-                                    break
-                        if not exists:
-                            merged.append(sv_item)
-                    result[key] = merged
+                    # ID-based merge if items have 'id' field
+                    if 'id' in sv[0] and sv[0]['id'] is not None:
+                        merged = list(sv)  # start with source items
+                        tv_ids = {item.get('id') for item in merged if isinstance(item, dict) and item.get('id')}
+                        for tv_item in tv:
+                            if isinstance(tv_item, dict) and tv_item.get('id') and tv_item['id'] not in tv_ids:
+                                merged.append(tv_item)
+                        result[key] = merged
+                    elif 'text' in sv[0]:
+                        # Text-based merge for workPlan-style items
+                        merged = list(sv)
+                        sv_texts = {item.get('text', '') for item in merged if isinstance(item, dict)}
+                        for tv_item in tv:
+                            if isinstance(tv_item, dict) and tv_item.get('text', '') not in sv_texts:
+                                merged.append(tv_item)
+                        result[key] = merged
+                    else:
+                        # Full comparison fallback
+                        merged = list(tv)
+                        for sv_item in sv:
+                            exists = False
+                            for mv_item in merged:
+                                if isinstance(sv_item, dict) and isinstance(mv_item, dict):
+                                    if sv_item == mv_item:
+                                        exists = True
+                                        break
+                            if not exists:
+                                merged.append(sv_item)
+                        result[key] = merged
                 else:
-                    # Simple lists (strings, numbers) — replace
+                    # Simple lists (strings, numbers) — source is authoritative
                     result[key] = sv
             else:
                 result[key] = sv
