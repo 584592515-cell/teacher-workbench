@@ -214,14 +214,19 @@ io.on('connection', (socket) => {
     if (!field || value === undefined) return;
 
     const current = loadData();
-    const defaults = getDefaultData();
-    current[field] = value;
+    // If both existing and new value are objects, deep merge to prevent overwriting
+    // other date-keyed entries in workPlan, etc.
+    if (current[field] && typeof current[field] === 'object' && typeof value === 'object' && !Array.isArray(current[field]) && !Array.isArray(value)) {
+      current[field] = deepMerge(current[field], value);
+    } else {
+      current[field] = value;
+    }
     current._lastModified = new Date().toISOString();
 
     saveData(current);
 
-    // Broadcast to all OTHER clients
-    socket.broadcast.emit('field_updated', { field, value });
+    // Broadcast to all OTHER clients (send merged value, not just the incoming partial)
+    socket.broadcast.emit('field_updated', { field, value: current[field] });
     console.log('[SYNC] Field updated:', field);
   });
 
