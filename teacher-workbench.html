@@ -1070,7 +1070,26 @@ async function heartbeat() {
       return;
     }
 
-    // 2. Update our heartbeat
+    // 1.5 Check if another device has claimed our session
+    if (session && session.deviceId && session.deviceId !== _deviceId) {
+      var lastHb = new Date(session.lastHeartbeat || 0).getTime();
+      if (Date.now() - lastHb < SESSION_TIMEOUT) {
+        console.log('[SESSION] Another device (' + session.deviceId + ') claimed our session! Yielding...');
+        _isLoggingOut = true;
+        await saveToGitHub(appData);
+        await clearDeviceSession();
+        stopHeartbeat();
+        toast('⚠️ 另一台设备已接管工作台，数据已自动保存', 'warning');
+        setTimeout(function() {
+          try { localStorage.removeItem('teacher_workbench_loggedin'); } catch(e) {}
+          window._teacher_loggedin = false;
+          location.reload();
+        }, 2000);
+        return;
+      }
+    }
+
+    // 2. Update our heartbeat (claim the session)
     var newSession = {
       deviceId: _deviceId,
       deviceName: getDeviceName(),
@@ -1115,10 +1134,11 @@ async function forceTakeover(targetDeviceId) {
   return false;
 }
 
-function startHeartbeat() {
+async function startHeartbeat() {
   stopHeartbeat();
-  // Do an immediate heartbeat
-  heartbeat();
+  // MUST await the first heartbeat so the session is written
+  // before another device's checkDeviceSession() can race us
+  await heartbeat();
   _heartbeatTimer = setInterval(heartbeat, HEARTBEAT_INTERVAL);
 }
 
@@ -1745,10 +1765,10 @@ window.addEventListener('beforeunload', function(e) {
   }
 });
 
-window.addEventListener('online', function() {
+window.addEventListener('online', async function() {
   console.log('[APP] Online — resuming heartbeat');
   updateOnlineStatus();
-  startHeartbeat();
+  await startHeartbeat();
 });
 window.addEventListener('offline', function() {
   console.log('[APP] Offline — stopping heartbeat');
@@ -4355,11 +4375,11 @@ async function init() {
         if (ok) {
           toast('✅ 已强制退出另一台设备，当前设备已接管', 'success');
           updateSyncStatus('online');
-          startHeartbeat();
+          await startHeartbeat();
         } else {
           toast('⚠️ 接管失败，请检查网络后重试', 'warning');
           updateSyncStatus('disconnected');
-          startHeartbeat();
+          await startHeartbeat();
         }
         // 7. Start idle detection + Render pages
         startIdleDetection();
@@ -4378,7 +4398,7 @@ async function init() {
       // No conflict — start heartbeat
       console.log('[SESSION] No device conflict, starting heartbeat');
       updateSyncStatus('online');
-      startHeartbeat();
+      await startHeartbeat();
     }
   } else {
     updateSyncStatus('disconnected');
