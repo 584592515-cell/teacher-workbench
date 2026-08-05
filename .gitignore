@@ -5,10 +5,10 @@ dist/
 # Dependencies
 cloud-server/node_modules/
 
-# Data files (don't commit user data)
+# Data files (runtime only, not committed)
 *.db
 *.sqlite
-data/
+cloud-server/data/
 
 # Python
 __pycache__/

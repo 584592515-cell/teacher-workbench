@@ -782,6 +782,91 @@ let _lastSyncTime = null;
 let _hasUnsavedChanges = false;
 let _usingCloud = false; // true when connected to cloud server
 let _initialCloudSyncDone = false; // true when REST API already pulled latest data in init()
+
+// ============ GITHUB DIRECT PERSISTENCE ============
+const GITHUB_REPO = '584592515-cell/teacher-workbench';
+const GITHUB_RAW_URL = 'https://raw.githubusercontent.com/' + GITHUB_REPO + '/main/data/workbench_data.json';
+const GITHUB_API_URL = 'https://api.github.com/repos/' + GITHUB_REPO + '/contents/data/workbench_data.json';
+const GITHUB_POLL_INTERVAL = 30000;
+let _githubToken = '';
+let _dataSha = null;
+let _pollTimer = null;
+let _lastSavedSnapshot = null;
+
+function utf8ToBase64(str) {
+  var bytes = [];
+  for (var i = 0; i < str.length; i++) {
+    var c = str.charCodeAt(i);
+    if (c < 0x80) bytes.push(c);
+    else if (c < 0x800) { bytes.push(0xC0 | (c >> 6)); bytes.push(0x80 | (c & 0x3F)); }
+    else if (c < 0xD800 || c >= 0xE000) { bytes.push(0xE0 | (c >> 12)); bytes.push(0x80 | ((c >> 6) & 0x3F)); bytes.push(0x80 | (c & 0x3F)); }
+    else { i++; c = 0x10000 + ((c & 0x3FF) << 10) | (str.charCodeAt(i) & 0x3FF); bytes.push(0xF0 | (c >> 18)); bytes.push(0x80 | ((c >> 12) & 0x3F)); bytes.push(0x80 | ((c >> 6) & 0x3F)); bytes.push(0x80 | (c & 0x3F)); }
+  }
+  var bin = '';
+  for (var j = 0; j < bytes.length; j++) bin += String.fromCharCode(bytes[j]);
+  return btoa(bin);
+}
+
+function base64ToUtf8(b64) {
+  var bin = atob(b64), bytes = [], i = 0, str = '';
+  for (var j = 0; j < bin.length; j++) bytes.push(bin.charCodeAt(j));
+  while (i < bytes.length) {
+    var b = bytes[i++];
+    if (b < 0x80) str += String.fromCharCode(b);
+    else if (b < 0xE0) { var b2 = bytes[i++]; str += String.fromCharCode(((b & 0x1F) << 6) | (b2 & 0x3F)); }
+    else if (b < 0xF0) { var b2 = bytes[i++], b3 = bytes[i++]; str += String.fromCharCode(((b & 0x0F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F)); }
+    else { var b2 = bytes[i++], b3 = bytes[i++], b4 = bytes[i++]; var cp = ((b & 0x07) << 18) | ((b2 & 0x3F) << 12) | ((b3 & 0x3F) << 6) | (b4 & 0x3F); str += String.fromCharCode(0xD800+((cp-0x10000)>>10)); str += String.fromCharCode(0xDC00+((cp-0x10000)&0x3FF)); }
+  }
+  return str;
+}
+
+function loadGithubToken() {
+  try { _githubToken = localStorage.getItem('teacher_github_token') || ''; } catch(e) {}
+}
+
+async function fetchFromGitHub() {
+  try {
+    if (_githubToken) {
+      var resp = await fetch(GITHUB_API_URL, { headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench' } });
+      if (resp.ok) { var f = await resp.json(); _dataSha = f.sha; return JSON.parse(base64ToUtf8(f.content)); }
+      if (resp.status === 401) { _githubToken = ''; try { localStorage.removeItem('teacher_github_token'); } catch(e) {} }
+    }
+    var raw = await fetch(GITHUB_RAW_URL + '?t=' + Date.now());
+    if (raw.ok) return await raw.json();
+  } catch(e) {}
+  return null;
+}
+
+async function saveToGitHub(data) {
+  if (!_githubToken) return false;
+  try {
+    var content = utf8ToBase64(JSON.stringify(data, null, 2));
+    var body = { message: 'data: auto-save @ ' + new Date().toISOString(), content: content };
+    if (_dataSha) body.sha = _dataSha;
+    var resp = await fetch(GITHUB_API_URL, { method: 'PUT', headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (resp.ok) { var r = await resp.json(); _dataSha = r.content.sha; _lastSavedSnapshot = JSON.stringify(data); return true; }
+    if (resp.status === 422) {
+      var g = await fetch(GITHUB_API_URL, { headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench' } });
+      if (g.ok) { _dataSha = (await g.json()).sha; body.sha = _dataSha;
+        var r2 = await fetch(GITHUB_API_URL, { method: 'PUT', headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (r2.ok) { var rr = await r2.json(); _dataSha = rr.content.sha; _lastSavedSnapshot = JSON.stringify(data); return true; }
+      }
+    }
+  } catch(e) {}
+  return false;
+}
+
+async function pollGitHub() {
+  if (!isOnline || _hasUnsavedChanges) return;
+  try {
+    var d = await fetchFromGitHub();
+    if (d) { var s = JSON.stringify(d); if (s !== _lastSavedSnapshot && s !== JSON.stringify(appData)) { appData = JSON.parse(JSON.stringify(d)); trimSchedule(appData.classSchedule); trimSchedule(appData.personalSchedule); _lastSavedSnapshot = s; _lastSyncTime = new Date(); _hasUnsavedChanges = false; updateSaveButton(); refreshCurrentPage(); toast('🔄 检测到其他设备更新，已自动同步', 'info'); } }
+  } catch(e) {}
+}
+
+function startGitHubPolling() { stopGitHubPolling(); _pollTimer = setInterval(pollGitHub, GITHUB_POLL_INTERVAL); }
+function stopGitHubPolling() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } }
+
 // ============ SOCKET.IO ============
 function connectSocket() {
   try {
@@ -1353,6 +1438,7 @@ function updateOnlineStatus() {
 
 // Warn before closing if there are unsaved changes
 window.addEventListener('beforeunload', function(e) {
+  stopGitHubPolling();
   if (_hasUnsavedChanges) {
     e.preventDefault();
     e.returnValue = '您有未保存的更改，确定离开吗？';
@@ -1363,6 +1449,7 @@ window.addEventListener('beforeunload', function(e) {
 window.addEventListener('online', function() {
   console.log('[APP] Online - syncing...');
   updateOnlineStatus();
+  startGitHubPolling();
   // Reconnect socket if needed, then sync
   if (!socketConnected && typeof io !== 'undefined') {
     connectSocket();
@@ -1379,6 +1466,7 @@ window.addEventListener('online', function() {
 });
 window.addEventListener('offline', function() {
   console.log('[APP] Offline - working locally');
+  stopGitHubPolling();
   updateOnlineStatus();
 });
 
@@ -1492,38 +1580,40 @@ async function doManualSave() {
   btn.textContent = '⏳ 保存中...';
   if (fab) { fab.classList.add('saving'); fab.textContent = '⏳ 保存中...'; }
 
-  // Push to server only — cloud is authoritative, no local copy kept
+  // 1. Try GitHub API (most reliable persistence)
   var saved = false;
-  if (useApi && isOnline) {
-    try {
-      var resp = await fetch(API_BASE + '/api/data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(appData)
-      });
-      saved = resp.ok;
-    } catch(e) { console.warn('Server save failed:', e); }
+  if (isOnline) {
+    if (!_githubToken) {
+      if (confirm('⚠️ 未配置 GitHub Token，数据无法跨设备持久化。\n\n点击「确定」去创建 Token，或「取消」仅保存到本地。')) {
+        var token = prompt('请输入 GitHub Personal Access Token (ghp_开头)：');
+        if (token && token.trim()) { _githubToken = token.trim(); try { localStorage.setItem('teacher_github_token', _githubToken); } catch(e) {} }
+      }
+    }
+    if (_githubToken) { saved = await saveToGitHub(appData); }
+  }
+  // 2. Fallback: Render server
+  if (!saved && useApi && isOnline) {
+    try { var resp = await fetch(API_BASE + '/api/data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appData) }); saved = resp.ok; } catch(e) {}
   }
 
   if (saved) {
     _lastSyncTime = new Date();
     _hasUnsavedChanges = false;
+    _lastSavedSnapshot = JSON.stringify(appData);
     updateSyncTime();
     updateSaveButton();
-    toast('✅ 保存成功 · 已同步到服务器', 'success');
+    try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
+    toast('✅ 保存成功 · 已同步到云端', 'success');
 
-    // Also emit via Socket.IO so other connected clients get the update in real-time
     if (socketConnected) {
-      try {
-        socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan });
-        console.log('[SYNC] doManualSave: pushed workPlan via Socket.IO');
-      } catch(e) { console.warn('[SYNC] Socket emit failed:', e); }
+      try { socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan }); } catch(e) {}
     }
   } else if (isOnline) {
     await queueSync('full', appData);
     _hasUnsavedChanges = true;
     updateSaveButton();
-    toast('⚠️ 服务器不可用 · 已暂存本地', 'warning');
+    toast(_githubToken ? '⚠️ 保存失败 · 请检查网络或Token' : '⚠️ 未配置GitHub Token · 数据仅暂存本地', 'warning');
   } else {
     await queueSync('full', appData);
     _hasUnsavedChanges = true;
@@ -3890,25 +3980,38 @@ async function init() {
   // Prevent double initialization
   if (_initCalled) { console.log('[INIT] Already initialized, skipping'); return; }
   _initCalled = true;
-  // 1. Load local data as fallback (from IndexedDB)
+  // 1. Load GitHub token
+  loadGithubToken();
+  // 2. Load local data as fallback (from IndexedDB)
   await loadLocalData();
-  // 2. Init cloud config (must complete before connecting socket)
+  // 3. Init cloud config
   await initCloudConfig();
-  // 3. Actively pull latest data from cloud server (REST API) — ensures every login gets freshest data
   setupNavigation();
   updateOnlineStatus();
-  if (useApi && isOnline) {
-    var cloudLoaded = await loadFromServer(true);
-    if (cloudLoaded) {
-      console.log('[INIT] Cloud data loaded via REST — using as authoritative');
-      _initialCloudSyncDone = true; // Prevent Socket full_sync from overwriting REST data
-    } else {
-      console.log('[INIT] REST pull failed, using local data — will sync via Socket.IO');
+  // 4. PRIMARY: GitHub direct (most reliable)
+  if (isOnline) {
+    var ghData = await fetchFromGitHub();
+    if (ghData) {
+      console.log('[INIT] Loaded from GitHub — authoritative data source');
+      appData = JSON.parse(JSON.stringify(ghData));
+      trimSchedule(appData.classSchedule);
+      trimSchedule(appData.personalSchedule);
+      _lastSavedSnapshot = JSON.stringify(appData);
+      _lastSyncTime = new Date();
+      _hasUnsavedChanges = false;
+      _initialCloudSyncDone = true;
+      try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
+    } else if (useApi) {
+      var cloudLoaded = await loadFromServer(true);
+      if (cloudLoaded) { console.log('[INIT] Loaded from Render server'); _initialCloudSyncDone = true; }
     }
   }
-  // 4. Connect Socket.IO for real-time updates (will NOT overwrite data if REST already loaded)
+  // 5. Start GitHub polling for multi-device sync
+  startGitHubPolling();
+  // 6. Socket.IO for real-time updates
   connectSocket();
-  // 5. Render
+  // 7. Render
   if (currentPage) navigateTo(currentPage);
   else navigateTo('dashboard');
 }
