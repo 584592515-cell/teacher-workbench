@@ -781,6 +781,7 @@ let useApi = true; // Will be set false if server unavailable
 let _lastSyncTime = null;
 let _hasUnsavedChanges = false;
 let _usingCloud = false; // true when connected to cloud server
+let _initialCloudSyncDone = false; // true when REST API already pulled latest data in init()
 // ============ SOCKET.IO ============
 function connectSocket() {
   try {
@@ -837,9 +838,13 @@ function connectSocket() {
     socket.on('full_sync', function(data) {
       console.log('[SOCKET] Received full sync from server');
       if (data && typeof data === 'object') {
-        // First sync (initial load): always auto-merge
+        // If REST API already loaded fresh data during init(), skip initial sync from Socket
         if (!_initialSyncDone) {
           _initialSyncDone = true;
+          if (_initialCloudSyncDone) {
+            console.log('[SOCKET] Initial full_sync skipped — REST already loaded latest data');
+            return;
+          }
           appData = deepMerge(appData, data);
           trimSchedule(appData.classSchedule);
           trimSchedule(appData.personalSchedule);
@@ -3893,19 +3898,24 @@ async function init() {
   // Prevent double initialization
   if (_initCalled) { console.log('[INIT] Already initialized, skipping'); return; }
   _initCalled = true;
-  // 1. Load local data FIRST (from IndexedDB) so appData has offline changes
+  // 1. Load local data as fallback (from IndexedDB)
   await loadLocalData();
   // 2. Init cloud config (must complete before connecting socket)
   await initCloudConfig();
-  // 3. Now connect to server (connect event will push queue then pull from server)
+  // 3. Actively pull latest data from cloud server (REST API) — ensures every login gets freshest data
   setupNavigation();
   updateOnlineStatus();
-  connectSocket();
-  // 4. If socket not available, try REST fallback
-  if (typeof io === 'undefined') {
-    var loaded = await loadFromServer(true);
-    if (!loaded) useApi = false;
+  if (useApi && isOnline) {
+    var cloudLoaded = await loadFromServer(true);
+    if (cloudLoaded) {
+      console.log('[INIT] Cloud data loaded via REST — using as authoritative');
+      _initialCloudSyncDone = true; // Prevent Socket full_sync from overwriting REST data
+    } else {
+      console.log('[INIT] REST pull failed, using local data — will sync via Socket.IO');
+    }
   }
+  // 4. Connect Socket.IO for real-time updates (will NOT overwrite data if REST already loaded)
+  connectSocket();
   // 5. Render
   if (currentPage) navigateTo(currentPage);
   else navigateTo('dashboard');
