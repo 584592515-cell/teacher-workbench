@@ -27,6 +27,12 @@ const AUTH_PASS = '638893';
 // Static files directory (served as PWA frontend)
 const STATIC_DIR = path.join(__dirname, '..');
 
+// --- GitHub persistence (free Render plan has ephemeral filesystem) ---
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+const GITHUB_REPO = '584592515-cell/teacher-workbench';
+const GITHUB_DATA_PATH = 'data/workbench_data.json';
+let _dataSha = null; // GitHub file SHA for updates
+
 // --- Ensure data directory ---
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -58,7 +64,89 @@ function loadData() {
 
 function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
-  console.log('[DATA] Saved', DATA_FILE, '(' + JSON.stringify(data).length + ' bytes)');
+  console.log('[DATA] Saved local cache (' + JSON.stringify(data).length + ' bytes)');
+  // Fire-and-forget: push to GitHub for persistent storage
+  pushToGitHub(data).then(function(ok) {
+    if (ok) console.log('[GITHUB] Persisted to repo');
+    else console.warn('[GITHUB] Push failed — data only in local cache');
+  });
+}
+
+// --- GitHub API helpers ---
+
+async function syncFromGitHub() {
+  if (!GITHUB_TOKEN) { console.log('[GITHUB] No token set — using local file only'); return; }
+  try {
+    var url = 'https://api.github.com/repos/' + GITHUB_REPO + '/contents/' + GITHUB_DATA_PATH;
+    var resp = await fetch(url, {
+      headers: { Authorization: 'token ' + GITHUB_TOKEN, 'User-Agent': 'teacher-workbench' }
+    });
+    if (resp.ok) {
+      var file = await resp.json();
+      _dataSha = file.sha;
+      var content = Buffer.from(file.content, 'base64').toString('utf-8');
+      var data = JSON.parse(content);
+      fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+      console.log('[GITHUB] Synced from repo (' + content.length + ' bytes)');
+    } else if (resp.status === 404) {
+      console.log('[GITHUB] No data file in repo yet — will create on first save');
+    } else {
+      console.warn('[GITHUB] Sync failed (HTTP ' + resp.status + ')');
+    }
+  } catch(e) { console.warn('[GITHUB] Sync error:', e.message); }
+}
+
+async function pushToGitHub(data) {
+  if (!GITHUB_TOKEN) return false;
+  try {
+    var url = 'https://api.github.com/repos/' + GITHUB_REPO + '/contents/' + GITHUB_DATA_PATH;
+    var content = Buffer.from(JSON.stringify(data, null, 2)).toString('base64');
+    var body = { message: 'data: auto-save', content: content };
+    if (_dataSha) body.sha = _dataSha;
+
+    var resp = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: 'token ' + GITHUB_TOKEN,
+        'User-Agent': 'teacher-workbench',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (resp.ok) {
+      var result = await resp.json();
+      _dataSha = result.content.sha;
+      return true;
+    }
+
+    // SHA conflict: re-fetch and retry once
+    if (resp.status === 422) {
+      var getResp = await fetch(url, {
+        headers: { Authorization: 'token ' + GITHUB_TOKEN, 'User-Agent': 'teacher-workbench' }
+      });
+      if (getResp.ok) {
+        var file = await getResp.json();
+        _dataSha = file.sha;
+        body.sha = _dataSha;
+        var retryResp = await fetch(url, {
+          method: 'PUT',
+          headers: {
+            Authorization: 'token ' + GITHUB_TOKEN,
+            'User-Agent': 'teacher-workbench',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(body)
+        });
+        if (retryResp.ok) {
+          var retryResult = await retryResp.json();
+          _dataSha = retryResult.content.sha;
+          return true;
+        }
+      }
+    }
+  } catch(e) { console.warn('[GITHUB] Push error:', e.message); }
+  return false;
 }
 
 function getDefaultData() {
@@ -241,10 +329,16 @@ io.on('connection', (socket) => {
 
 // ============ START ============
 
-server.listen(PORT, () => {
-  console.log('========================================');
-  console.log('  班主任工作台云端同步服务器已启动');
-  console.log('  Port:', PORT);
-  console.log('  Data:', DATA_FILE);
-  console.log('========================================');
-});
+(async function() {
+  // Sync latest data from GitHub before accepting connections
+  await syncFromGitHub();
+
+  server.listen(PORT, function() {
+    console.log('========================================');
+    console.log('  班主任工作台云端同步服务器已启动');
+    console.log('  Port:', PORT);
+    console.log('  Data:', DATA_FILE);
+    console.log('  GitHub:', GITHUB_TOKEN ? 'enabled' : 'disabled (set GITHUB_TOKEN to enable)');
+    console.log('========================================');
+  });
+})();
