@@ -243,7 +243,8 @@
   "seating": {
     "rows": 6,
     "cols": 8,
-    "layout": {}
+    "layout": {},
+    "seats": {}
   },
   "attendance": {},
   "grades": {
@@ -259,5 +260,17 @@
     "balance": 0
   },
   "teachingClasses": [],
-  "_lastModified": "2026-08-05T05:46:26.411Z"
+  "_lastModified": "2026-08-05T05:46:36.017Z",
+  "classInfo": {
+    "className": "七年级(1)班",
+    "grade": "七年级",
+    "classNum": "1",
+    "headTeacher": "",
+    "totalStudents": 45,
+    "maleCount": 23,
+    "femaleCount": 22
+  },
+  "classMeetings": [],
+  "parentCommunications": [],
+  "notifications": []
 }
