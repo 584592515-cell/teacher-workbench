@@ -327,6 +327,11 @@ table input:focus, table select:focus {
 .token-modal-btn.primary:hover { opacity: 0.9; }
 .token-modal-btn.secondary { background: var(--bg); color: var(--text-light); border: 1px solid var(--border); }
 .token-modal-btn.secondary:hover { background: var(--border); }
+/* Idle warning modal */
+.idle-countdown {
+  font-size: 48px; font-weight: 700; color: var(--danger);
+  text-align: center; margin: 12px 0; font-variant-numeric: tabular-nums;
+}
 /* Toast */
 .toast {
   position: fixed; top: 20px; right: 20px; z-index: 9999;
@@ -749,7 +754,7 @@ table input:focus, table select:focus {
 <div id="toastContainer"></div>
 
 <!-- Offline indicator -->
-<div id="offlineIndicator" class="offline-indicator">⚡ 离线模式 · 数据将自动同步</div>
+<div id="offlineIndicator" class="offline-indicator">⚡ 离线模式 · 数据仅保存在本地</div>
 
 <script>
 // ============ API CONFIG ============
@@ -805,6 +810,8 @@ const GITHUB_SESSION_URL = 'https://api.github.com/repos/' + GITHUB_REPO + '/con
 const GITHUB_SESSION_RAW = 'https://raw.githubusercontent.com/' + GITHUB_REPO + '/main/data/device_session.json';
 const HEARTBEAT_INTERVAL = 30000; // 30s heartbeat
 const SESSION_TIMEOUT = 90000; // 90s without heartbeat = stale session
+const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 min no activity → show warning
+const IDLE_WARNING = 60; // 60s countdown before auto-logout
 let _githubToken = '';
 let _dataSha = null;
 let _sessionSha = null;
@@ -813,7 +820,11 @@ let _lastSavedSnapshot = null;
 let _tokenModalCallback = null;
 let _deviceId = '';
 let _sessionToken = '';
-let _isLoggingOut = false; // prevent double-save during force logout
+let _isLoggingOut = false;
+// Idle timeout
+let _idleTimer = null;
+let _idleCountdownTimer = null;
+let _idleCountdownSec = IDLE_WARNING;
 
 // ---- Device Conflict Modal ----
 var _conflictCallback = null;
@@ -1113,6 +1124,101 @@ function startHeartbeat() {
 
 function stopHeartbeat() {
   if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
+}
+
+// ============ IDLE TIMEOUT (auto-logout after inactivity) ============
+function resetIdleTimer() {
+  // Hide warning modal if shown
+  var warn = document.getElementById('idleWarningModal');
+  if (warn) warn.style.display = 'none';
+  // Clear existing timers
+  stopIdleDetection();
+  // Restart idle detection
+  startIdleDetection();
+}
+
+function startIdleDetection() {
+  stopIdleDetection();
+  _idleTimer = setTimeout(showIdleWarning, IDLE_TIMEOUT);
+  // Bind activity listeners
+  document.addEventListener('mousemove', _idleActivityHandler, { passive: true });
+  document.addEventListener('keydown', _idleActivityHandler, { passive: true });
+  document.addEventListener('mousedown', _idleActivityHandler, { passive: true });
+  document.addEventListener('touchstart', _idleActivityHandler, { passive: true });
+  document.addEventListener('scroll', _idleActivityHandler, { passive: true });
+  document.addEventListener('wheel', _idleActivityHandler, { passive: true });
+}
+
+function stopIdleDetection() {
+  if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
+  if (_idleCountdownTimer) { clearInterval(_idleCountdownTimer); _idleCountdownTimer = null; }
+  document.removeEventListener('mousemove', _idleActivityHandler);
+  document.removeEventListener('keydown', _idleActivityHandler);
+  document.removeEventListener('mousedown', _idleActivityHandler);
+  document.removeEventListener('touchstart', _idleActivityHandler);
+  document.removeEventListener('scroll', _idleActivityHandler);
+  document.removeEventListener('wheel', _idleActivityHandler);
+}
+
+function _idleActivityHandler() {
+  // User is active — reset the idle timer
+  if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
+  if (_idleCountdownTimer) { clearInterval(_idleCountdownTimer); _idleCountdownTimer = null; }
+  var warn = document.getElementById('idleWarningModal');
+  if (warn) warn.style.display = 'none';
+  // Restart idle detection
+  _idleTimer = setTimeout(showIdleWarning, IDLE_TIMEOUT);
+}
+
+function showIdleWarning() {
+  _idleCountdownSec = IDLE_WARNING;
+  var modal = document.getElementById('idleWarningModal');
+  if (!modal) return;
+  var countdownEl = document.getElementById('idleCountdown');
+  if (countdownEl) countdownEl.textContent = _idleCountdownSec;
+  modal.style.display = 'flex';
+  // Start countdown
+  _idleCountdownTimer = setInterval(function() {
+    _idleCountdownSec--;
+    if (countdownEl) countdownEl.textContent = _idleCountdownSec;
+    if (_idleCountdownSec <= 0) {
+      clearInterval(_idleCountdownTimer);
+      _idleCountdownTimer = null;
+      forceIdleLogout();
+    }
+  }, 1000);
+}
+
+async function forceIdleLogout() {
+  // Called when idle countdown expires or user clicks "立即退出"
+  var modal = document.getElementById('idleWarningModal');
+  if (modal) modal.style.display = 'none';
+  stopIdleDetection();
+  _isLoggingOut = true;
+  stopHeartbeat();
+
+  // Save data to cloud before logout
+  if (isOnline && _githubToken) {
+    var result = await saveToGitHub(appData);
+    if (result.success) {
+      _hasUnsavedChanges = false;
+      toast('⏰ 长时间未操作，已自动保存并退出', 'warning');
+    } else {
+      toast('⏰ 长时间未操作，退出了（保存失败）', 'warning');
+    }
+  } else {
+    toast('⏰ 长时间未操作，已退出登录', 'warning');
+  }
+
+  // Clear device session
+  await clearDeviceSession();
+
+  // Clear login state
+  try { localStorage.removeItem('teacher_workbench_loggedin'); } catch(e) {}
+  window._teacher_loggedin = false;
+
+  // Reload to show login screen
+  setTimeout(function() { location.reload(); }, 1000);
 }
 
 // ============ SOCKET.IO ============
@@ -1613,23 +1719,14 @@ function updateOnlineStatus() {
   }
 }
 
-// When leaving page: save data to cloud + clear session
+// When leaving page: clear device session (NO auto-save to cloud)
+// Data saving only happens via manual save or explicit logout
 window.addEventListener('beforeunload', function(e) {
   stopHeartbeat();
-  if (_isLoggingOut) return;
-  // Try to save and clear session synchronously via sendBeacon or sync
-  if (_githubToken && _deviceId) {
-    // Use fetch with keepalive for reliable send on page close
-    try {
-      var payload = JSON.stringify(appData);
-      var content = utf8ToBase64(payload);
-      fetch(GITHUB_API_URL, {
-        method: 'PUT', keepalive: true,
-        headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: 'auto-save on exit @ ' + new Date().toISOString(), content: content, sha: _dataSha || undefined })
-      });
-    } catch(ex) {}
-    // Clear session
+  // Save local copy for safety
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
+  // Clear device session on GitHub so another device can log in
+  if (_githubToken && _deviceId && !_isLoggingOut) {
     try {
       var sessionPayload = JSON.stringify({ deviceId: '', deviceName: '', lastHeartbeat: new Date().toISOString(), sessionToken: '', forceLogout: false, forceTargetDeviceId: '' });
       var sContent = utf8ToBase64(sessionPayload);
@@ -1639,6 +1736,12 @@ window.addEventListener('beforeunload', function(e) {
         body: JSON.stringify({ message: 'clear session on exit', content: sContent, sha: _sessionSha || undefined })
       });
     } catch(ex) {}
+  }
+  // Warn if unsaved changes exist
+  if (_hasUnsavedChanges && !_isLoggingOut) {
+    e.preventDefault();
+    e.returnValue = '您有未保存的更改！关闭页面将丢失这些更改。';
+    return e.returnValue;
   }
 });
 
@@ -1743,6 +1846,8 @@ async function saveDataLocal(skipFlag) {
   if (!skipFlag) { _hasUnsavedChanges = true; updateSaveButton(); }
   // Local cache for safety (persists across page refreshes)
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
+  // Reset idle timer (editing = active user)
+  if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = setTimeout(showIdleWarning, IDLE_TIMEOUT); }
 }
 
 // Alias: keep old function name for compatibility with all data-modification code
@@ -1823,6 +1928,7 @@ async function doLogout() {
   if (!confirm('退出登录将自动保存当前内容到云端，确定退出吗？')) return;
   _isLoggingOut = true;
   stopHeartbeat();
+  stopIdleDetection();
 
   // Save data to GitHub before logout
   if (isOnline && _githubToken) {
@@ -1838,11 +1944,9 @@ async function doLogout() {
   // Clear device session on GitHub
   await clearDeviceSession();
 
-  // Clear login state
+  // Clear login state (keep GitHub token for next login)
   try { localStorage.removeItem('teacher_workbench_loggedin'); } catch(e) {}
-  try { localStorage.removeItem('teacher_github_token'); } catch(e) {}
   window._teacher_loggedin = false;
-  _githubToken = '';
 
   // Reload to show login screen
   setTimeout(function() { location.reload(); }, 500);
@@ -4257,7 +4361,8 @@ async function init() {
           updateSyncStatus('disconnected');
           startHeartbeat();
         }
-        // 7. Render pages
+        // 7. Start idle detection + Render pages
+        startIdleDetection();
         if (currentPage) navigateTo(currentPage);
         else navigateTo('dashboard');
       }, function() {
@@ -4283,7 +4388,10 @@ async function init() {
   // 6. Socket.IO for real-time updates (passive, no auto-sync)
   connectSocket();
 
-  // 7. Render pages
+  // 7. Start idle detection for auto-logout after inactivity
+  startIdleDetection();
+
+  // 8. Render pages
   if (currentPage) navigateTo(currentPage);
   else navigateTo('dashboard');
 }
@@ -4440,6 +4548,23 @@ document.addEventListener('DOMContentLoaded', function() {
     <p id="saveErrorMessage" style="font-size:13px;color:var(--text);margin-bottom:12px;"></p>
     <div style="text-align:right;">
       <button class="token-modal-btn primary" onclick="document.getElementById('saveErrorModal').style.display='none'">知道了</button>
+    </div>
+  </div>
+</div>
+
+<!-- Idle Warning Modal (auto-logout after inactivity) -->
+<div id="idleWarningModal" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:420px;text-align:center;">
+    <h3>⏰ 长时间未操作</h3>
+    <p style="color:var(--text-light);font-size:13px;margin-bottom:4px;">
+      检测到您已长时间未操作，将在
+    </p>
+    <div class="idle-countdown" id="idleCountdown">60</div>
+    <p style="color:var(--text-light);font-size:13px;">秒后自动退出登录</p>
+    <p style="color:var(--text);font-size:12px;margin-top:8px;">退出前会自动保存当前内容到云端</p>
+    <div style="margin-top:16px;display:flex;gap:8px;justify-content:center;">
+      <button class="token-modal-btn primary" onclick="resetIdleTimer()" id="idleKeepBtn">继续使用</button>
+      <button class="token-modal-btn secondary" onclick="forceIdleLogout()">立即退出</button>
     </div>
   </div>
 </div>
