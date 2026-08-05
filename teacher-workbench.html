@@ -781,9 +781,6 @@ let useApi = true; // Will be set false if server unavailable
 let _lastSyncTime = null;
 let _hasUnsavedChanges = false;
 let _usingCloud = false; // true when connected to cloud server
-let _autoSaveTimer = null;
-const AUTO_SAVE_DELAY = 2000; // 2 seconds debounce
-
 // ============ SOCKET.IO ============
 function connectSocket() {
   try {
@@ -835,55 +832,129 @@ function connectSocket() {
       console.warn('[SOCKET] Connection error:', err.message);
     });
     
+    var _initialSyncDone = false;
+    var _pendingSyncData = null; // Stores incoming sync data while dialog is shown
+
     socket.on('full_sync', function(data) {
       console.log('[SOCKET] Received full sync from server');
       if (data && typeof data === 'object') {
-        // Protection: if there are unsaved local changes, skip merge to avoid overwriting
-        // User's local changes take priority; they will be pushed to server on next save
-        if (_hasUnsavedChanges) {
-          console.log('[SOCKET] Local has unsaved changes — skipping full_sync merge, preserving local data');
+        // First sync (initial load): auto-merge without asking
+        if (!_initialSyncDone) {
+          _initialSyncDone = true;
+          appData = deepMerge(appData, data);
+          trimSchedule(appData.classSchedule);
+          trimSchedule(appData.personalSchedule);
+          _lastSyncTime = new Date();
+          _hasUnsavedChanges = false;
+          saveDataLocal(true).then(function() { updateSaveButton(); });
+          refreshCurrentPage();
+          console.log('[SOCKET] Initial sync completed (auto)');
           return;
         }
-        // Merge server data into current local data (preserve local unsaved changes)
-        // Items with matching IDs get replaced by server version; unique local items survive
-        appData = deepMerge(appData, data);
-        // Auto-repair any inflated schedule arrays
-        trimSchedule(appData.classSchedule);
-        trimSchedule(appData.personalSchedule);
-        _lastSyncTime = new Date();
-        _hasUnsavedChanges = false;
-        saveDataLocal(true).then(function() { updateSaveButton(); });
-        refreshCurrentPage();
+        // Subsequent syncs: prompt user before merging
+        _pendingSyncData = { type: 'full_sync', data: data };
+        showSyncConfirm();
       }
     });
     
     socket.on('field_updated', function(data) {
       console.log('[SOCKET] Field updated by other client:', data.field);
       if (data.field && data.value !== undefined) {
-        // Deep merge to preserve local items not in the server update
-        if (appData[data.field] && typeof appData[data.field] === 'object' && typeof data.value === 'object') {
-          appData[data.field] = deepMerge(appData[data.field], data.value);
-        } else {
-          appData[data.field] = data.value;
-        }
-        // Auto-trim if a schedule field was updated
-        if (data.field === 'classSchedule') trimSchedule(appData.classSchedule);
-        if (data.field === 'personalSchedule') trimSchedule(appData.personalSchedule);
-        _hasUnsavedChanges = false;
-        saveDataLocal(true).then(function() { updateSaveButton(); });
-        refreshCurrentPage();
+        _pendingSyncData = { type: 'field_updated', data: data };
+        showSyncConfirm();
       }
     });
     
     socket.on('data_changed', function(data) {
       console.log('[SOCKET] Data changed by other client, reloading:', data.field);
-      // Server is authoritative — replace local with latest server data
-      loadFromServer(true);
+      _pendingSyncData = { type: 'data_changed', data: data };
+      showSyncConfirm();
     });
   } catch(e) {
     console.warn('Socket.IO init failed, using offline mode:', e);
     useApi = false;
   }
+}
+
+// Show sync confirmation dialog when other clients push data
+function showSyncConfirm() {
+  if (!_pendingSyncData) return;
+  
+  // If dialog already exists, just update (newer data arrived)
+  var existing = document.getElementById('syncConfirmOverlay');
+  if (existing) return; // Dialog already shown, _pendingSyncData already updated
+
+  var overlay = document.createElement('div');
+  overlay.id = 'syncConfirmOverlay';
+  overlay.className = 'modal-overlay';
+  overlay.style.display = 'flex';
+  overlay.style.zIndex = '2000';
+
+  var typeLabel = '';
+  if (_pendingSyncData.type === 'full_sync') typeLabel = '全量数据';
+  else if (_pendingSyncData.type === 'field_updated') typeLabel = '字段「' + (_pendingSyncData.data.field || '') + '」';
+  else if (_pendingSyncData.type === 'data_changed') typeLabel = '数据变更';
+
+  overlay.innerHTML =
+    '<div class="modal-dialog" style="text-align:center;">' +
+      '<div style="font-size:42px;margin-bottom:8px;">🔄</div>' +
+      '<h3 style="text-align:center;">数据同步提示</h3>' +
+      '<p style="color:#666;font-size:14px;line-height:1.6;margin:8px 0 4px;">检测到其他客户端更新了<strong>' + typeLabel + '</strong>，</p>' +
+      '<p style="color:#666;font-size:14px;line-height:1.6;margin:0 0 4px;">是否同步到当前页面？</p>' +
+      '<div style="background:#f5f5f5;border-radius:8px;padding:10px 14px;margin:14px 0;font-size:12px;color:#888;">' +
+        '点击「同步」将合并其他客户端的最新数据<br>点击「忽略」保留当前本地数据' +
+      '</div>' +
+      '<div class="modal-actions" style="justify-content:center;">' +
+        '<button id="syncConfirmYes" style="padding:8px 24px;border:none;border-radius:8px;background:var(--primary);color:#fff;font-size:14px;cursor:pointer;">同步</button>' +
+        '<button id="syncConfirmNo" style="padding:8px 24px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#333;font-size:14px;cursor:pointer;">忽略</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+
+  document.getElementById('syncConfirmYes').onclick = function() {
+    applyPendingSync();
+    document.body.removeChild(overlay);
+  };
+  document.getElementById('syncConfirmNo').onclick = function() {
+    console.log('[SYNC] User chose to ignore sync from other client');
+    _pendingSyncData = null;
+    document.body.removeChild(overlay);
+  };
+}
+
+// Apply the pending sync data to local appData
+function applyPendingSync() {
+  if (!_pendingSyncData) return;
+  var pending = _pendingSyncData;
+  _pendingSyncData = null;
+
+  if (pending.type === 'full_sync') {
+    appData = deepMerge(appData, pending.data);
+    trimSchedule(appData.classSchedule);
+    trimSchedule(appData.personalSchedule);
+  } else if (pending.type === 'field_updated') {
+    var d = pending.data;
+    if (d.field && d.value !== undefined) {
+      if (appData[d.field] && typeof appData[d.field] === 'object' && typeof d.value === 'object') {
+        appData[d.field] = deepMerge(appData[d.field], d.value);
+      } else {
+        appData[d.field] = d.value;
+      }
+      if (d.field === 'classSchedule') trimSchedule(appData.classSchedule);
+      if (d.field === 'personalSchedule') trimSchedule(appData.personalSchedule);
+    }
+  } else if (pending.type === 'data_changed') {
+    loadFromServer(true);
+    return; // loadFromServer handles its own refresh
+  }
+
+  _lastSyncTime = new Date();
+  _hasUnsavedChanges = false;
+  saveDataLocal(true).then(function() { updateSaveButton(); });
+  refreshCurrentPage();
+  toast('已同步其他客户端的数据', 'success');
+  console.log('[SYNC] Sync applied from other client');
 }
 
 function updateSyncStatus(status) {
@@ -1453,53 +1524,11 @@ async function saveDataLocal(skipFlag) {
         console.log('[SYNC] Realtime push: workPlan via Socket.IO');
       } catch(e) { console.warn('[SYNC] Socket emit failed:', e); }
     }
-    // Trigger auto-save after local changes
-    triggerAutoSave();
   } catch(e) { console.warn('Failed to save local:', e); }
 }
 
 // Alias: keep old function name for compatibility with all data-modification code
 var saveData = saveDataLocal;
-
-// Auto-save: triggers a debounced server save after local changes
-function triggerAutoSave() {
-  if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
-  _autoSaveTimer = setTimeout(function() {
-    if (_hasUnsavedChanges && isOnline) {
-      console.log('[AUTO-SAVE] Auto-saving...');
-      doSilentSave();
-    }
-  }, AUTO_SAVE_DELAY);
-}
-
-// Silent save: same as doManualSave but without toast notifications or button animations
-async function doSilentSave() {
-  if (!_hasUnsavedChanges) return;
-  try {
-    await idbPut('data', { key: 'appData', value: appData });
-  } catch(e) {}
-  
-  if (useApi && isOnline) {
-    try {
-      var resp = await fetch(API_BASE + '/api/data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(appData)
-      });
-      if (resp.ok) {
-        _lastSyncTime = new Date();
-        _hasUnsavedChanges = false;
-        updateSyncTime();
-        updateSaveButton();
-        console.log('[AUTO-SAVE] Saved successfully');
-        // Push workPlan via Socket.IO
-        if (socketConnected) {
-          try { socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan }); } catch(e) {}
-        }
-      }
-    } catch(e) { console.warn('[AUTO-SAVE] Server unreachable, will retry'); }
-  }
-}
 
 // doManualSave — explicit save: persist locally + push full data to server
 async function doManualSave() {
@@ -1874,13 +1903,6 @@ function closeMobileNav() {
 }
 
 function navigateTo(page) {
-  // Auto-save before switching pages if there are unsaved changes
-  if (_hasUnsavedChanges && currentPage !== page) {
-    doSilentSave();
-  }
-  // Cancel any pending auto-save since we're navigating away
-  if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
-  
   currentPage = page;
   let html = '';
   switch(page) {
