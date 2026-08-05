@@ -313,6 +313,20 @@ table input:focus, table select:focus {
   box-shadow: 0 8px 30px rgba(0,0,0,0.2);
 }
 .modal h3 { margin-bottom: 16px; font-size: 18px; }
+/* Token Modal */
+.token-modal-input {
+  width: 100%; padding: 10px 12px; border: 2px solid var(--border);
+  border-radius: 8px; font-size: 13px; font-family: 'Courier New', monospace;
+  box-sizing: border-box;
+}
+.token-modal-input:focus { outline: none; border-color: var(--primary); }
+.token-modal-link { color: var(--primary); text-decoration: underline; cursor: pointer; font-size:12px; }
+.token-modal-error { color: var(--danger); font-size: 12px; margin-top: 8px; display: none; }
+.token-modal-btn { padding: 8px 20px; border-radius: 8px; font-size: 13px; cursor: pointer; border: none; font-weight: 500; }
+.token-modal-btn.primary { background: var(--primary); color: #fff; }
+.token-modal-btn.primary:hover { opacity: 0.9; }
+.token-modal-btn.secondary { background: var(--bg); color: var(--text-light); border: 1px solid var(--border); }
+.token-modal-btn.secondary:hover { background: var(--border); }
 /* Toast */
 .toast {
   position: fixed; top: 20px; right: 20px; z-index: 9999;
@@ -645,7 +659,7 @@ table input:focus, table select:focus {
 <div id="appContainer" style="display:none;">
 
 <!-- Sync Status Bar -->
-<div id="syncBar" class="sync-bar disconnected"><span id="syncText">🔄 正在连接服务器...</span> <button id="syncSaveBtn" class="sync-save-btn" onclick="doManualSave()">💾 保存</button> <button id="syncRefreshBtn" class="sync-refresh-btn" onclick="manualRefresh()" title="从服务器刷新最新数据">⟳ 刷新</button> <span class="sync-last-time" id="syncLastTime"></span></div>
+<div id="syncBar" class="sync-bar disconnected"><span id="syncText">🔴 未登录云端</span> <button id="syncSaveBtn" class="sync-save-btn" onclick="doManualSave()">💾 保存</button> <button id="syncLogoutBtn" class="sync-refresh-btn" onclick="doLogout()" title="退出登录（自动保存）">🚪 退出</button> <span class="sync-last-time" id="syncLastTime"></span></div>
 
 <!-- Mobile floating save button -->
 <button id="mobileSaveFab" class="mobile-save-fab" onclick="doManualSave()">💾 保存到服务器</button>
@@ -787,11 +801,84 @@ let _initialCloudSyncDone = false; // true when REST API already pulled latest d
 const GITHUB_REPO = '584592515-cell/teacher-workbench';
 const GITHUB_RAW_URL = 'https://raw.githubusercontent.com/' + GITHUB_REPO + '/main/data/workbench_data.json';
 const GITHUB_API_URL = 'https://api.github.com/repos/' + GITHUB_REPO + '/contents/data/workbench_data.json';
-const GITHUB_POLL_INTERVAL = 30000;
+const GITHUB_SESSION_URL = 'https://api.github.com/repos/' + GITHUB_REPO + '/contents/data/device_session.json';
+const GITHUB_SESSION_RAW = 'https://raw.githubusercontent.com/' + GITHUB_REPO + '/main/data/device_session.json';
+const HEARTBEAT_INTERVAL = 30000; // 30s heartbeat
+const SESSION_TIMEOUT = 90000; // 90s without heartbeat = stale session
 let _githubToken = '';
 let _dataSha = null;
-let _pollTimer = null;
+let _sessionSha = null;
+let _heartbeatTimer = null;
 let _lastSavedSnapshot = null;
+let _tokenModalCallback = null;
+let _deviceId = '';
+let _sessionToken = '';
+let _isLoggingOut = false; // prevent double-save during force logout
+
+// ---- Device Conflict Modal ----
+var _conflictCallback = null;
+var _conflictCancelCallback = null;
+
+function showConflictModal(deviceName, deviceId, onTakeover, onCancel) {
+  _conflictCallback = onTakeover;
+  _conflictCancelCallback = onCancel;
+  document.getElementById('conflictDeviceName').textContent = deviceName || '未知设备';
+  document.getElementById('conflictModal').style.display = 'flex';
+}
+
+async function confirmTakeover() {
+  document.getElementById('conflictModal').style.display = 'none';
+  var btn = document.getElementById('conflictTakeoverBtn');
+  if (btn) { btn.textContent = '⏳ 正在接管...'; btn.disabled = true; }
+  if (_conflictCallback) await _conflictCallback();
+  if (btn) { btn.textContent = '强制退出并接管'; btn.disabled = false; }
+  _conflictCallback = null;
+  _conflictCancelCallback = null;
+}
+
+function cancelTakeover() {
+  document.getElementById('conflictModal').style.display = 'none';
+  if (_conflictCancelCallback) _conflictCancelCallback();
+  _conflictCallback = null;
+  _conflictCancelCallback = null;
+}
+// ---- Token Modal (HTML-based, works in pywebview) ----
+function showTokenModal(callback) {
+  _tokenModalCallback = callback;
+  document.getElementById('tokenInput').value = _githubToken || '';
+  document.getElementById('tokenModalError').style.display = 'none';
+  document.getElementById('tokenModal').style.display = 'flex';
+  setTimeout(function() { document.getElementById('tokenInput').focus(); }, 100);
+}
+function confirmTokenModal() {
+  var token = document.getElementById('tokenInput').value.trim();
+  if (!token) {
+    var err = document.getElementById('tokenModalError');
+    err.textContent = '请输入 GitHub Token';
+    err.style.display = 'block';
+    return;
+  }
+  if (!token.startsWith('ghp_') && !token.startsWith('github_pat_')) {
+    var err2 = document.getElementById('tokenModalError');
+    err2.textContent = 'Token 格式不正确，应以 ghp_ 或 github_pat_ 开头';
+    err2.style.display = 'block';
+    return;
+  }
+  _githubToken = token;
+  try { localStorage.setItem('teacher_github_token', _githubToken); } catch(e) {}
+  document.getElementById('tokenModal').style.display = 'none';
+  if (_tokenModalCallback) { _tokenModalCallback(token); _tokenModalCallback = null; }
+}
+function cancelTokenModal() {
+  document.getElementById('tokenModal').style.display = 'none';
+  if (_tokenModalCallback) { _tokenModalCallback(null); _tokenModalCallback = null; }
+}
+
+function showSaveError(title, msg) {
+  document.getElementById('saveErrorTitle').textContent = title;
+  document.getElementById('saveErrorMessage').textContent = msg;
+  document.getElementById('saveErrorModal').style.display = 'flex';
+}
 
 function utf8ToBase64(str) {
   var bytes = [];
@@ -824,12 +911,14 @@ function loadGithubToken() {
   try { _githubToken = localStorage.getItem('teacher_github_token') || ''; } catch(e) {}
 }
 
-async function fetchFromGitHub() {
+async function fetchFromGitHub(clearBadToken) {
   try {
     if (_githubToken) {
       var resp = await fetch(GITHUB_API_URL, { headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench' } });
       if (resp.ok) { var f = await resp.json(); _dataSha = f.sha; return JSON.parse(base64ToUtf8(f.content)); }
-      if (resp.status === 401) { _githubToken = ''; try { localStorage.removeItem('teacher_github_token'); } catch(e) {} }
+      // Only clear token on explicit requests (init/save), not during background polling
+      if (resp.status === 401 && clearBadToken) { _githubToken = ''; try { localStorage.removeItem('teacher_github_token'); } catch(e) {} }
+      if (resp.status === 403) { console.warn('[GITHUB] Rate limited or token lacks permissions'); }
     }
     var raw = await fetch(GITHUB_RAW_URL + '?t=' + Date.now());
     if (raw.ok) return await raw.json();
@@ -838,34 +927,193 @@ async function fetchFromGitHub() {
 }
 
 async function saveToGitHub(data) {
-  if (!_githubToken) return false;
+  if (!_githubToken) return { success: false, error: 'no_token' };
   try {
     var content = utf8ToBase64(JSON.stringify(data, null, 2));
     var body = { message: 'data: auto-save @ ' + new Date().toISOString(), content: content };
     if (_dataSha) body.sha = _dataSha;
     var resp = await fetch(GITHUB_API_URL, { method: 'PUT', headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (resp.ok) { var r = await resp.json(); _dataSha = r.content.sha; _lastSavedSnapshot = JSON.stringify(data); return true; }
+    if (resp.ok) { var r = await resp.json(); _dataSha = r.content.sha; _lastSavedSnapshot = JSON.stringify(data); return { success: true }; }
+    if (resp.status === 401) { return { success: false, error: 'unauthorized', msg: 'Token 无效或已过期，请重新配置。' }; }
+    if (resp.status === 403) { return { success: false, error: 'forbidden', msg: 'Token 权限不足，需勾选 repo 权限。' }; }
     if (resp.status === 422) {
+      // SHA mismatch — refetch and retry
       var g = await fetch(GITHUB_API_URL, { headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench' } });
       if (g.ok) { _dataSha = (await g.json()).sha; body.sha = _dataSha;
         var r2 = await fetch(GITHUB_API_URL, { method: 'PUT', headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (r2.ok) { var rr = await r2.json(); _dataSha = rr.content.sha; _lastSavedSnapshot = JSON.stringify(data); return true; }
+        if (r2.ok) { var rr = await r2.json(); _dataSha = rr.content.sha; _lastSavedSnapshot = JSON.stringify(data); return { success: true }; }
+        if (r2.status === 401) { return { success: false, error: 'unauthorized', msg: 'Token 无效或已过期。' }; }
+        if (r2.status === 403) { return { success: false, error: 'forbidden', msg: 'Token 权限不足，需勾选 repo 权限。' }; }
+      }
+      return { success: false, error: 'conflict', msg: '数据冲突，请刷新后重试。' };
+    }
+    return { success: false, error: 'network', msg: 'GitHub API 返回状态 ' + resp.status + '，请检查网络。' };
+  } catch(e) {
+    return { success: false, error: 'network', msg: '无法连接 GitHub，请检查网络。' };
+  }
+}
+
+// ============ DEVICE SESSION & HEARTBEAT ============
+function generateDeviceId() {
+  var id = 'dev_';
+  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  for (var i = 0; i < 12; i++) id += chars.charAt(Math.floor(Math.random() * chars.length));
+  return id;
+}
+
+function generateSessionToken() {
+  var tok = '';
+  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (var i = 0; i < 32; i++) tok += chars.charAt(Math.floor(Math.random() * chars.length));
+  return tok;
+}
+
+function getDeviceName() {
+  try {
+    var ua = navigator.userAgent;
+    if (ua.indexOf('Windows') >= 0) return 'Windows 电脑';
+    if (ua.indexOf('Mac') >= 0) return 'Mac 电脑';
+    if (ua.indexOf('Android') >= 0) return 'Android 手机';
+    if (ua.indexOf('iPhone') >= 0 || ua.indexOf('iPad') >= 0) return 'iPhone/iPad';
+    return '未知设备';
+  } catch(e) { return '未知设备'; }
+}
+
+async function fetchSession() {
+  if (!_githubToken) return null;
+  try {
+    var resp = await fetch(GITHUB_SESSION_URL, { headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench' } });
+    if (resp.ok) { var f = await resp.json(); _sessionSha = f.sha; return JSON.parse(base64ToUtf8(f.content)); }
+    // 404 = no session file yet — first device to log in
+    if (resp.status === 404) { _sessionSha = null; return null; }
+  } catch(e) {}
+  // Fallback: try raw URL
+  try {
+    var raw = await fetch(GITHUB_SESSION_RAW + '?t=' + Date.now());
+    if (raw.ok) return await raw.json();
+  } catch(e) {}
+  return null;
+}
+
+async function writeSession(sessionData) {
+  if (!_githubToken) return false;
+  try {
+    var content = utf8ToBase64(JSON.stringify(sessionData, null, 2));
+    var body = { message: 'session: heartbeat @ ' + new Date().toISOString(), content: content };
+    if (_sessionSha) body.sha = _sessionSha;
+    var resp = await fetch(GITHUB_SESSION_URL, { method: 'PUT', headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (resp.ok) { var r = await resp.json(); _sessionSha = r.content.sha; return true; }
+    if (resp.status === 422) {
+      // SHA stale — refetch and retry once
+      var g = await fetch(GITHUB_SESSION_URL, { headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench' } });
+      if (g.ok) { _sessionSha = (await g.json()).sha; body.sha = _sessionSha;
+        var r2 = await fetch(GITHUB_SESSION_URL, { method: 'PUT', headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (r2.ok) { _sessionSha = (await r2.json()).sha; return true; }
       }
     }
   } catch(e) {}
   return false;
 }
 
-async function pollGitHub() {
-  if (!isOnline || _hasUnsavedChanges) return;
+async function clearDeviceSession() {
+  if (!_githubToken || !_deviceId) return;
   try {
-    var d = await fetchFromGitHub();
-    if (d) { var s = JSON.stringify(d); if (s !== _lastSavedSnapshot && s !== JSON.stringify(appData)) { appData = JSON.parse(JSON.stringify(d)); trimSchedule(appData.classSchedule); trimSchedule(appData.personalSchedule); _lastSavedSnapshot = s; _lastSyncTime = new Date(); _hasUnsavedChanges = false; updateSaveButton(); refreshCurrentPage(); toast('🔄 检测到其他设备更新，已自动同步', 'info'); } }
+    // Write a session with empty deviceId to effectively "log out"
+    var data = { deviceId: '', deviceName: '', lastHeartbeat: new Date().toISOString(), sessionToken: '', forceLogout: false, forceTargetDeviceId: '' };
+    await writeSession(data);
   } catch(e) {}
 }
 
-function startGitHubPolling() { stopGitHubPolling(); _pollTimer = setInterval(pollGitHub, GITHUB_POLL_INTERVAL); }
-function stopGitHubPolling() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } }
+async function checkDeviceSession() {
+  // Returns: null = no conflict, or {deviceId, deviceName} = another device is active
+  var session = await fetchSession();
+  if (!session || !session.deviceId) return null; // no active session
+  if (session.deviceId === _deviceId) return null; // it's us
+  // Check if session is still alive (heartbeat within SESSION_TIMEOUT)
+  var lastHb = new Date(session.lastHeartbeat || 0).getTime();
+  var now = Date.now();
+  if (now - lastHb > SESSION_TIMEOUT) return null; // stale session
+  return { deviceId: session.deviceId, deviceName: session.deviceName || '未知设备' };
+}
+
+async function heartbeat() {
+  if (!isOnline || !_githubToken || !_deviceId || _isLoggingOut) return;
+  try {
+    // 1. Read current session to check if we've been force-logged-out
+    var session = await fetchSession();
+    if (session && session.forceLogout && session.forceTargetDeviceId === _deviceId) {
+      console.log('[SESSION] Force logout detected! Auto-saving before exit...');
+      _isLoggingOut = true;
+      // Auto-save current data to GitHub
+      await saveToGitHub(appData);
+      // Clear session
+      await clearDeviceSession();
+      // Show message and return to login
+      stopHeartbeat();
+      toast('⚠️ 您的设备已被另一台设备强制退出，数据已自动保存', 'warning');
+      setTimeout(function() {
+        try { localStorage.removeItem('teacher_workbench_loggedin'); } catch(e) {}
+        window._teacher_loggedin = false;
+        location.reload();
+      }, 2000);
+      return;
+    }
+
+    // 2. Update our heartbeat
+    var newSession = {
+      deviceId: _deviceId,
+      deviceName: getDeviceName(),
+      lastHeartbeat: new Date().toISOString(),
+      sessionToken: _sessionToken,
+      forceLogout: false,
+      forceTargetDeviceId: ''
+    };
+    await writeSession(newSession);
+  } catch(e) { console.warn('[HEARTBEAT] Error:', e); }
+}
+
+async function forceTakeover(targetDeviceId) {
+  if (!_githubToken) return false;
+  try {
+    // Write force logout command targeting the other device
+    var session = await fetchSession();
+    if (!session) {
+      // No session exists — just claim it
+      var newSession = {
+        deviceId: _deviceId, deviceName: getDeviceName(),
+        lastHeartbeat: new Date().toISOString(), sessionToken: _sessionToken,
+        forceLogout: false, forceTargetDeviceId: ''
+      };
+      return await writeSession(newSession);
+    }
+    session.forceLogout = true;
+    session.forceTargetDeviceId = targetDeviceId;
+    var result = await writeSession(session);
+    if (result) {
+      // Wait a moment for the other device to detect and save
+      await new Promise(function(r) { setTimeout(r, 2000); });
+      // Now claim the session for ourselves
+      var ourSession = {
+        deviceId: _deviceId, deviceName: getDeviceName(),
+        lastHeartbeat: new Date().toISOString(), sessionToken: _sessionToken,
+        forceLogout: false, forceTargetDeviceId: ''
+      };
+      return await writeSession(ourSession);
+    }
+  } catch(e) {}
+  return false;
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  // Do an immediate heartbeat
+  heartbeat();
+  _heartbeatTimer = setInterval(heartbeat, HEARTBEAT_INTERVAL);
+}
+
+function stopHeartbeat() {
+  if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
+}
 
 // ============ SOCKET.IO ============
 function connectSocket() {
@@ -921,75 +1169,19 @@ function connectSocket() {
     var _initialSyncDone = false;
 
     socket.on('full_sync', async function(data) {
-      console.log('[SOCKET] Received full sync from server');
-      if (data && typeof data === 'object') {
-        // If REST API already loaded fresh data during init(), skip initial sync from Socket
-        if (!_initialSyncDone) {
-          _initialSyncDone = true;
-          if (_initialCloudSyncDone) {
-            console.log('[SOCKET] Initial full_sync skipped — REST already loaded latest data');
-            return;
-          }
-          // Cloud-authoritative: full replacement (not merge)
-          appData = JSON.parse(JSON.stringify(data));
-          trimSchedule(appData.classSchedule);
-          trimSchedule(appData.personalSchedule);
-          _lastSyncTime = new Date();
-          _hasUnsavedChanges = false;
-          // Persist cloud snapshot for offline startup
-          try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
-          updateSaveButton();
-          refreshCurrentPage();
-          console.log('[SOCKET] Initial sync completed (cloud-authoritative replacement)');
-          return;
-        }
-        // Subsequent syncs: cloud-authoritative replacement (last-save-wins strategy)
-        // If user has unsaved local changes, preserve them — they become authoritative on next save
-        if (_hasUnsavedChanges) {
-          console.log('[SOCKET] Local has unsaved changes — skipping full_sync, preserving local data');
-          return;
-        }
-        appData = JSON.parse(JSON.stringify(data));
-        trimSchedule(appData.classSchedule);
-        trimSchedule(appData.personalSchedule);
-        _lastSyncTime = new Date();
-        _hasUnsavedChanges = false;
-        try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
-        updateSaveButton();
-        refreshCurrentPage();
-        console.log('[SOCKET] Full sync applied (cloud-authoritative replacement)');
-      }
+      // Socket.IO sync is disabled — single-device mode,
+      // data loads only from GitHub on login
+      console.log('[SOCKET] full_sync received (ignored — single-device mode)');
     });
     
     socket.on('field_updated', async function(data) {
-      console.log('[SOCKET] Field updated by other client:', data.field);
-      if (!data.field || data.value === undefined) return;
-      // If user has unsaved local changes, preserve them
-      if (_hasUnsavedChanges) {
-        console.log('[SOCKET] Local has unsaved changes — skipping field_updated for:', data.field);
-        return;
-      }
-      // Cloud-authoritative: direct replacement (NOT merge)
-      appData[data.field] = data.value;
-      if (data.field === 'classSchedule') trimSchedule(appData.classSchedule);
-      if (data.field === 'personalSchedule') trimSchedule(appData.personalSchedule);
-      _lastSyncTime = new Date();
-      _hasUnsavedChanges = false;
-      // Persist cloud snapshot
-      try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
-      updateSaveButton();
-      refreshCurrentPage();
-      console.log('[SOCKET] Field updated — cloud-authoritative replacement:', data.field);
+      // Socket.IO sync is disabled — single-device mode
+      console.log('[SOCKET] field_updated received (ignored — single-device mode)');
     });
     
     socket.on('data_changed', function(data) {
-      console.log('[SOCKET] Data changed by other client:', data.field);
-      // If user has unsaved local changes, preserve them
-      if (_hasUnsavedChanges) {
-        console.log('[SOCKET] Local has unsaved changes — skipping reload, preserving local data');
-        return;
-      }
-      loadFromServer(true);
+      // Socket.IO sync is disabled — single-device mode
+      console.log('[SOCKET] data_changed received (ignored — single-device mode)');
     });
   } catch(e) {
     console.warn('Socket.IO init failed, using offline mode:', e);
@@ -1004,11 +1196,13 @@ function updateSyncStatus(status) {
   bar.className = 'sync-bar ' + status;
   var msg = '';
   if (status === 'online') {
-    msg = '🟢 已连接服务器';
+    msg = '🟢 ' + getDeviceName() + ' · 已连接云端';
   } else if (status === 'offline') {
-    msg = '🟡 服务器连接中断 · 数据暂存本地';
+    msg = '🟡 离线模式 · 数据暂存本地';
+  } else if (status === 'disconnected') {
+    msg = '🔴 未连接 · 无法同步';
   } else {
-    msg = '🔴 未连接服务器 · 离线模式';
+    msg = '🔴 未登录云端';
   }
   if (text) { text.textContent = msg; }
   updateSyncTime();
@@ -1197,23 +1391,8 @@ function saveCloudSettings() {
   closeCloudSettings();
 }
 
-function doLogout() {
-  if (!confirm('确定要退出登录吗？')) return;
-  try { localStorage.removeItem('teacher_workbench_loggedin'); } catch(e) {}
-  window._teacher_loggedin = false;
-  window._loginInProgress = false;
-  _initCalled = false;
-  if (socket) { socket.disconnect(); socket = null; }
-  socketConnected = false;
-  document.getElementById('appContainer').style.display = 'none';
-  document.getElementById('loginWrapper').style.display = '';
-  document.body.style.display = '';
-  document.getElementById('loginUser').value = '';
-  document.getElementById('loginPass').value = '';
-  document.getElementById('loginError').textContent = '';
-  // Re-fill remembered username
-  fillRememberedUser();
-}
+// doLogout moved to DATA LAYER section — see below
+function _oldDoLogoutPlaceholder() {}
 
 function renderAccount() {
   var auth = getAuth();
@@ -1426,47 +1605,51 @@ function updateOnlineStatus() {
   if (indicator) {
     indicator.className = isOnline ? 'offline-indicator' : 'offline-indicator show';
   }
-  if (isOnline && socketConnected) {
+  // Update sync bar display
+  if (isOnline) {
     updateSyncStatus('online');
-    processSyncQueue();
-  } else if (isOnline) {
-    updateSyncStatus('disconnected');
   } else {
     updateSyncStatus('offline');
   }
 }
 
-// Warn before closing if there are unsaved changes
+// When leaving page: save data to cloud + clear session
 window.addEventListener('beforeunload', function(e) {
-  stopGitHubPolling();
-  if (_hasUnsavedChanges) {
-    e.preventDefault();
-    e.returnValue = '您有未保存的更改，确定离开吗？';
-    return e.returnValue;
+  stopHeartbeat();
+  if (_isLoggingOut) return;
+  // Try to save and clear session synchronously via sendBeacon or sync
+  if (_githubToken && _deviceId) {
+    // Use fetch with keepalive for reliable send on page close
+    try {
+      var payload = JSON.stringify(appData);
+      var content = utf8ToBase64(payload);
+      fetch(GITHUB_API_URL, {
+        method: 'PUT', keepalive: true,
+        headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'auto-save on exit @ ' + new Date().toISOString(), content: content, sha: _dataSha || undefined })
+      });
+    } catch(ex) {}
+    // Clear session
+    try {
+      var sessionPayload = JSON.stringify({ deviceId: '', deviceName: '', lastHeartbeat: new Date().toISOString(), sessionToken: '', forceLogout: false, forceTargetDeviceId: '' });
+      var sContent = utf8ToBase64(sessionPayload);
+      fetch(GITHUB_SESSION_URL, {
+        method: 'PUT', keepalive: true,
+        headers: { Authorization: 'token ' + _githubToken, 'User-Agent': 'teacher-workbench', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'clear session on exit', content: sContent, sha: _sessionSha || undefined })
+      });
+    } catch(ex) {}
   }
 });
 
 window.addEventListener('online', function() {
-  console.log('[APP] Online - syncing...');
+  console.log('[APP] Online — resuming heartbeat');
   updateOnlineStatus();
-  startGitHubPolling();
-  // Reconnect socket if needed, then sync
-  if (!socketConnected && typeof io !== 'undefined') {
-    connectSocket();
-  }
-  // Wait for socket to reconnect, then process queue
-  var retries = 0;
-  var trySync = setInterval(function() {
-    retries++;
-    if (socketConnected || retries > 20) {
-      clearInterval(trySync);
-      processSyncQueue();
-    }
-  }, 300);
+  startHeartbeat();
 });
 window.addEventListener('offline', function() {
-  console.log('[APP] Offline - working locally');
-  stopGitHubPolling();
+  console.log('[APP] Offline — stopping heartbeat');
+  stopHeartbeat();
   updateOnlineStatus();
 });
 
@@ -1553,25 +1736,19 @@ async function processSyncQueue() {
 }
 
 // ============ DATA LAYER ============
-// saveDataLocal — mark unsaved changes + push workPlan via Socket.IO (NO local persistence)
+// saveDataLocal — mark unsaved changes, cache locally (NO auto-upload to cloud)
 async function saveDataLocal(skipFlag) {
-  // Cloud-first: data lives on server; local is transient working copy.
-  // Local IndexedDB only stores the latest cloud-synced snapshot (set after successful sync).
+  // In single-device mode: only mark unsaved for UI indicator
+  // Data is ONLY saved to cloud on manual save or logout
   if (!skipFlag) { _hasUnsavedChanges = true; updateSaveButton(); }
-
-  // Real-time sync: push workPlan changes to other clients via Socket.IO
-  if (socketConnected) {
-    try {
-      socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan });
-      console.log('[SYNC] Realtime push: workPlan via Socket.IO');
-    } catch(e) { console.warn('[SYNC] Socket emit failed:', e); }
-  }
+  // Local cache for safety (persists across page refreshes)
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
 }
 
 // Alias: keep old function name for compatibility with all data-modification code
 var saveData = saveDataLocal;
 
-// doManualSave — push full data to cloud server (cloud-authoritative, NO local persistence)
+// doManualSave — push full data to GitHub cloud (only on explicit user action)
 async function doManualSave() {
   var btn = document.getElementById('syncSaveBtn');
   var fab = document.getElementById('mobileSaveFab');
@@ -1580,20 +1757,35 @@ async function doManualSave() {
   btn.textContent = '⏳ 保存中...';
   if (fab) { fab.classList.add('saving'); fab.textContent = '⏳ 保存中...'; }
 
-  // 1. Try GitHub API (most reliable persistence)
+  // 1. Try GitHub API
   var saved = false;
+  var saveError = null;
   if (isOnline) {
     if (!_githubToken) {
-      if (confirm('⚠️ 未配置 GitHub Token，数据无法跨设备持久化。\n\n点击「确定」去创建 Token，或「取消」仅保存到本地。')) {
-        var token = prompt('请输入 GitHub Personal Access Token (ghp_开头)：');
-        if (token && token.trim()) { _githubToken = token.trim(); try { localStorage.setItem('teacher_github_token', _githubToken); } catch(e) {} }
+      await new Promise(function(resolve) {
+        showTokenModal(function(token) { resolve(); });
+      });
+    }
+    if (_githubToken) {
+      var result = await saveToGitHub(appData);
+      if (result.success) {
+        saved = true;
+      } else if (result.error === 'unauthorized' || result.error === 'forbidden') {
+        saveError = result.msg || 'Token 无效';
+        _githubToken = '';
+        try { localStorage.removeItem('teacher_github_token'); } catch(e) {}
+      } else if (result.error === 'network') {
+        saveError = result.msg || '网络连接失败';
+      } else if (result.error === 'conflict') {
+        saveError = result.msg || '数据冲突';
+      } else if (result.error !== 'no_token') {
+        saveError = 'GitHub 保存失败，请检查 Token。';
       }
     }
-    if (_githubToken) { saved = await saveToGitHub(appData); }
   }
   // 2. Fallback: Render server
   if (!saved && useApi && isOnline) {
-    try { var resp = await fetch(API_BASE + '/api/data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appData) }); saved = resp.ok; } catch(e) {}
+    try { var resp = await fetch(API_BASE + '/api/data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(appData) }); saved = resp.ok; if (!resp.ok) saveError = saveError || '云端服务器不可用'; } catch(e) { saveError = saveError || '云端服务器不可用'; }
   }
 
   if (saved) {
@@ -1605,25 +1797,55 @@ async function doManualSave() {
     try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
     toast('✅ 保存成功 · 已同步到云端', 'success');
-
-    if (socketConnected) {
-      try { socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan }); } catch(e) {}
-    }
+    // Update heartbeat to keep session alive
+    if (!_isLoggingOut) heartbeat();
   } else if (isOnline) {
-    await queueSync('full', appData);
     _hasUnsavedChanges = true;
     updateSaveButton();
-    toast(_githubToken ? '⚠️ 保存失败 · 请检查网络或Token' : '⚠️ 未配置GitHub Token · 数据仅暂存本地', 'warning');
+    if (saveError) {
+      showSaveError('⚠️ 保存失败', saveError + '\n\n数据已暂存本地，请检查网络或Token后重试。');
+    } else {
+      toast('⚠️ 保存失败 · 数据仅暂存本地', 'warning');
+    }
   } else {
-    await queueSync('full', appData);
     _hasUnsavedChanges = true;
     updateSaveButton();
-    toast('💾 已保存到本地 · 连接后将自动同步', 'success');
+    toast('💾 已保存到本地缓存 · 联网后请手动保存', 'success');
   }
 
   btn.textContent = '💾 保存';
   btn.classList.remove('saving');
   if (fab) { fab.classList.remove('saving'); fab.textContent = '💾 保存到服务器'; }
+}
+
+// doLogout — save data to cloud, clear session, return to login
+async function doLogout() {
+  if (!confirm('退出登录将自动保存当前内容到云端，确定退出吗？')) return;
+  _isLoggingOut = true;
+  stopHeartbeat();
+
+  // Save data to GitHub before logout
+  if (isOnline && _githubToken) {
+    var result = await saveToGitHub(appData);
+    if (result.success) {
+      _hasUnsavedChanges = false;
+      toast('✅ 数据已保存 · 正在退出...', 'success');
+    } else {
+      toast('⚠️ 保存失败，数据可能丢失', 'warning');
+    }
+  }
+
+  // Clear device session on GitHub
+  await clearDeviceSession();
+
+  // Clear login state
+  try { localStorage.removeItem('teacher_workbench_loggedin'); } catch(e) {}
+  try { localStorage.removeItem('teacher_github_token'); } catch(e) {}
+  window._teacher_loggedin = false;
+  _githubToken = '';
+
+  // Reload to show login screen
+  setTimeout(function() { location.reload(); }, 500);
 }
 
 function updateSaveButton() {
@@ -3980,17 +4202,26 @@ async function init() {
   // Prevent double initialization
   if (_initCalled) { console.log('[INIT] Already initialized, skipping'); return; }
   _initCalled = true;
-  // 1. Load GitHub token
+
+  // 1. Load GitHub token + generate device identity
   loadGithubToken();
+  _deviceId = generateDeviceId();
+  _sessionToken = generateSessionToken();
+  try { _deviceId = localStorage.getItem('teacher_device_id') || _deviceId; } catch(e) {}
+  try { localStorage.setItem('teacher_device_id', _deviceId); } catch(e) {}
+  console.log('[INIT] Device ID:', _deviceId);
+
   // 2. Load local data as fallback (from IndexedDB)
   await loadLocalData();
+
   // 3. Init cloud config
   await initCloudConfig();
   setupNavigation();
   updateOnlineStatus();
+
   // 4. PRIMARY: GitHub direct (most reliable)
   if (isOnline) {
-    var ghData = await fetchFromGitHub();
+    var ghData = await fetchFromGitHub(true); // clear bad token on init
     if (ghData) {
       console.log('[INIT] Loaded from GitHub — authoritative data source');
       appData = JSON.parse(JSON.stringify(ghData));
@@ -4007,11 +4238,52 @@ async function init() {
       if (cloudLoaded) { console.log('[INIT] Loaded from Render server'); _initialCloudSyncDone = true; }
     }
   }
-  // 5. Start GitHub polling for multi-device sync
-  startGitHubPolling();
-  // 6. Socket.IO for real-time updates
+
+  // 5. Check device session — single-device enforcement
+  if (_githubToken) {
+    var conflict = await checkDeviceSession();
+    if (conflict) {
+      // Another device is online — show conflict modal
+      showConflictModal(conflict.deviceName, conflict.deviceId, async function() {
+        // User chose force takeover
+        console.log('[SESSION] Force takeover of device:', conflict.deviceId);
+        var ok = await forceTakeover(conflict.deviceId);
+        if (ok) {
+          toast('✅ 已强制退出另一台设备，当前设备已接管', 'success');
+          updateSyncStatus('online');
+          startHeartbeat();
+        } else {
+          toast('⚠️ 接管失败，请检查网络后重试', 'warning');
+          updateSyncStatus('disconnected');
+          startHeartbeat();
+        }
+        // 7. Render pages
+        if (currentPage) navigateTo(currentPage);
+        else navigateTo('dashboard');
+      }, function() {
+        // User cancelled — go back to login
+        stopHeartbeat();
+        try { localStorage.removeItem('teacher_workbench_loggedin'); } catch(e) {}
+        window._teacher_loggedin = false;
+        location.reload();
+      });
+      // Return early — conflict modal handles the rest
+      return;
+    } else {
+      // No conflict — start heartbeat
+      console.log('[SESSION] No device conflict, starting heartbeat');
+      updateSyncStatus('online');
+      startHeartbeat();
+    }
+  } else {
+    updateSyncStatus('disconnected');
+    console.log('[SESSION] No GitHub token — working offline');
+  }
+
+  // 6. Socket.IO for real-time updates (passive, no auto-sync)
   connectSocket();
-  // 7. Render
+
+  // 7. Render pages
   if (currentPage) navigateTo(currentPage);
   else navigateTo('dashboard');
 }
@@ -4120,5 +4392,57 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 </script>
+
+<!-- Device Conflict Modal (single-device enforcement) -->
+<div id="conflictModal" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:440px;">
+    <h3>⚠️ 设备冲突</h3>
+    <p style="color:var(--text);font-size:14px;margin-bottom:8px;">
+      检测到另一台设备 <b id="conflictDeviceName" style="color:var(--danger);">未知设备</b> 当前在线。
+    </p>
+    <p style="color:var(--text-light);font-size:12px;line-height:1.6;margin-bottom:16px;">
+      班主任工作台仅支持单设备登录。<br>
+      • 点击「强制退出并接管」：另一台设备将被强制退出，其内容会自动保存到云端<br>
+      • 点击「取消」：返回登录页，本次不登录
+    </p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button class="token-modal-btn secondary" onclick="cancelTakeover()">取消</button>
+      <button id="conflictTakeoverBtn" class="token-modal-btn" style="background:var(--danger);color:#fff;" onclick="confirmTakeover()">强制退出并接管</button>
+    </div>
+  </div>
+</div>
+
+<!-- Token Config Modal (works in all environments including pywebview) -->
+<div id="tokenModal" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:460px;">
+    <h3>🔑 配置 GitHub Token</h3>
+    <p style="color:var(--text-light);font-size:13px;margin-bottom:8px;">
+      数据将通过 GitHub 仓库持久化，换设备登录也不会丢失。
+    </p>
+    <p style="color:var(--text-light);font-size:12px;margin-bottom:12px;line-height:1.6;">
+      ① 前往 <a class="token-modal-link" href="#" onclick="event.preventDefault();window.open('https://github.com/settings/tokens','_blank')">github.com/settings/tokens</a><br>
+      ② 点击 <b>Generate new token (classic)</b><br>
+      ③ 勾选 <b>repo</b> 权限，生成后复制粘贴到下方
+    </p>
+    <input id="tokenInput" class="token-modal-input" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+    <div id="tokenModalError" class="token-modal-error"></div>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="token-modal-btn secondary" onclick="cancelTokenModal()">跳过（仅本地保存）</button>
+      <button class="token-modal-btn primary" onclick="confirmTokenModal()">确认并保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Save Error Detail Modal -->
+<div id="saveErrorModal" class="modal-overlay" style="display:none;">
+  <div class="modal" style="max-width:440px;">
+    <h3 id="saveErrorTitle">⚠️ 保存失败</h3>
+    <p id="saveErrorMessage" style="font-size:13px;color:var(--text);margin-bottom:12px;"></p>
+    <div style="text-align:right;">
+      <button class="token-modal-btn primary" onclick="document.getElementById('saveErrorModal').style.display='none'">知道了</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
