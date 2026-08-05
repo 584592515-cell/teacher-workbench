@@ -1,5 +1,14 @@
 {
-  "workPlan": {},
+  "workPlan": {
+    "2026-08-05": [
+      {
+        "id": "wp_msfkni2y_7f4xyo",
+        "text": "测试",
+        "done": false,
+        "photos": []
+      }
+    ]
+  },
   "classSchedule": {
     "periods": [
       "第1节",
@@ -192,5 +201,5 @@
     "balance": 0
   },
   "teachingClasses": [],
-  "_lastModified": "2026-08-05T04:12:41.842Z"
+  "_lastModified": "2026-08-05T04:13:17.701Z"
 }
