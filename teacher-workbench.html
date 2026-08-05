@@ -835,7 +835,7 @@ function connectSocket() {
     
     var _initialSyncDone = false;
 
-    socket.on('full_sync', function(data) {
+    socket.on('full_sync', async function(data) {
       console.log('[SOCKET] Received full sync from server');
       if (data && typeof data === 'object') {
         // If REST API already loaded fresh data during init(), skip initial sync from Socket
@@ -845,54 +845,56 @@ function connectSocket() {
             console.log('[SOCKET] Initial full_sync skipped — REST already loaded latest data');
             return;
           }
-          appData = deepMerge(appData, data);
+          // Cloud-authoritative: full replacement (not merge)
+          appData = JSON.parse(JSON.stringify(data));
           trimSchedule(appData.classSchedule);
           trimSchedule(appData.personalSchedule);
           _lastSyncTime = new Date();
           _hasUnsavedChanges = false;
-          saveDataLocal(true).then(function() { updateSaveButton(); });
+          // Persist cloud snapshot for offline startup
+          try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
+          updateSaveButton();
           refreshCurrentPage();
-          console.log('[SOCKET] Initial sync completed (auto)');
+          console.log('[SOCKET] Initial sync completed (cloud-authoritative replacement)');
           return;
         }
-        // Subsequent syncs: auto-merge if no unsaved changes (last-save-wins strategy)
+        // Subsequent syncs: cloud-authoritative replacement (last-save-wins strategy)
         // If user has unsaved local changes, preserve them — they become authoritative on next save
         if (_hasUnsavedChanges) {
-          console.log('[SOCKET] Local has unsaved changes — skipping full_sync merge, preserving local data');
+          console.log('[SOCKET] Local has unsaved changes — skipping full_sync, preserving local data');
           return;
         }
-        appData = deepMerge(appData, data);
+        appData = JSON.parse(JSON.stringify(data));
         trimSchedule(appData.classSchedule);
         trimSchedule(appData.personalSchedule);
         _lastSyncTime = new Date();
         _hasUnsavedChanges = false;
-        saveDataLocal(true).then(function() { updateSaveButton(); });
+        try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
+        updateSaveButton();
         refreshCurrentPage();
-        console.log('[SOCKET] Full sync applied (last-save-wins)');
+        console.log('[SOCKET] Full sync applied (cloud-authoritative replacement)');
       }
     });
     
-    socket.on('field_updated', function(data) {
+    socket.on('field_updated', async function(data) {
       console.log('[SOCKET] Field updated by other client:', data.field);
       if (!data.field || data.value === undefined) return;
       // If user has unsaved local changes, preserve them
       if (_hasUnsavedChanges) {
-        console.log('[SOCKET] Local has unsaved changes — skipping field_updated merge for:', data.field);
+        console.log('[SOCKET] Local has unsaved changes — skipping field_updated for:', data.field);
         return;
       }
-      // Deep merge for objects, direct assign for primitives
-      if (appData[data.field] && typeof appData[data.field] === 'object' && typeof data.value === 'object' && !Array.isArray(appData[data.field]) && !Array.isArray(data.value)) {
-        appData[data.field] = deepMerge(appData[data.field], data.value);
-      } else {
-        appData[data.field] = data.value;
-      }
+      // Cloud-authoritative: direct replacement (NOT merge)
+      appData[data.field] = data.value;
       if (data.field === 'classSchedule') trimSchedule(appData.classSchedule);
       if (data.field === 'personalSchedule') trimSchedule(appData.personalSchedule);
       _lastSyncTime = new Date();
       _hasUnsavedChanges = false;
-      saveDataLocal(true).then(function() { updateSaveButton(); });
+      // Persist cloud snapshot
+      try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
+      updateSaveButton();
       refreshCurrentPage();
-      console.log('[SOCKET] Field updated applied (last-save-wins):', data.field);
+      console.log('[SOCKET] Field updated — cloud-authoritative replacement:', data.field);
     });
     
     socket.on('data_changed', function(data) {
@@ -1463,27 +1465,25 @@ async function processSyncQueue() {
 }
 
 // ============ DATA LAYER ============
-// saveDataLocal — save to IndexedDB + push workPlan changes via Socket.IO in real-time
+// saveDataLocal — mark unsaved changes + push workPlan via Socket.IO (NO local persistence)
 async function saveDataLocal(skipFlag) {
-  try {
-    await idbPut('data', { key: 'appData', value: appData });
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
-    if (!skipFlag) { _hasUnsavedChanges = true; updateSaveButton(); }
+  // Cloud-first: data lives on server; local is transient working copy.
+  // Local IndexedDB only stores the latest cloud-synced snapshot (set after successful sync).
+  if (!skipFlag) { _hasUnsavedChanges = true; updateSaveButton(); }
 
-    // Real-time sync: push workPlan changes to other clients via Socket.IO
-    if (socketConnected) {
-      try {
-        socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan });
-        console.log('[SYNC] Realtime push: workPlan via Socket.IO');
-      } catch(e) { console.warn('[SYNC] Socket emit failed:', e); }
-    }
-  } catch(e) { console.warn('Failed to save local:', e); }
+  // Real-time sync: push workPlan changes to other clients via Socket.IO
+  if (socketConnected) {
+    try {
+      socket.emit('field_updated', { field: 'workPlan', value: appData.workPlan });
+      console.log('[SYNC] Realtime push: workPlan via Socket.IO');
+    } catch(e) { console.warn('[SYNC] Socket emit failed:', e); }
+  }
 }
 
 // Alias: keep old function name for compatibility with all data-modification code
 var saveData = saveDataLocal;
 
-// doManualSave — explicit save: persist locally + push full data to server
+// doManualSave — push full data to cloud server (cloud-authoritative, NO local persistence)
 async function doManualSave() {
   var btn = document.getElementById('syncSaveBtn');
   var fab = document.getElementById('mobileSaveFab');
@@ -1492,13 +1492,7 @@ async function doManualSave() {
   btn.textContent = '⏳ 保存中...';
   if (fab) { fab.classList.add('saving'); fab.textContent = '⏳ 保存中...'; }
 
-  // 1. Always save to IndexedDB first
-  try {
-    await idbPut('data', { key: 'appData', value: appData });
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
-  } catch(e) { console.warn('Local save failed:', e); }
-
-  // 2. Push to server if online
+  // Push to server only — cloud is authoritative, no local copy kept
   var saved = false;
   if (useApi && isOnline) {
     try {
@@ -1561,18 +1555,16 @@ async function loadFromServer(forceReplace) {
     if (resp.ok) {
       var data = await resp.json();
       if (data && typeof data === 'object') {
-        if (forceReplace) {
-          // Merge server data into current local (ID-based: matching IDs replaced, unique kept)
-          appData = deepMerge(appData, data);
-        } else {
-          // Keep local changes that haven't been pushed, merge in server updates
-          appData = deepMerge(appData, data);
-        }
+        // Cloud-authoritative: full replacement, NOT merge.
+        // Server always stores the complete data structure (merged with defaults).
+        appData = JSON.parse(JSON.stringify(data));
         // Auto-repair any inflated schedule arrays from server
         trimSchedule(appData.classSchedule);
         trimSchedule(appData.personalSchedule);
         _lastSyncTime = new Date();
-        await saveDataLocal();
+        // Persist cloud snapshot to IndexedDB for offline startup
+        try { await idbPut('data', { key: 'appData', value: appData }); } catch(e) {}
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(appData)); } catch(e) {}
         _hasUnsavedChanges = false;
         updateSaveButton();
         refreshCurrentPage();
